@@ -1,0 +1,128 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.circle.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Finality and Block Confirmations
+
+> Block confirmation requirements and attestation timing for CCTP
+
+Before signing an attestation, Circle waits for blockchain transactions to
+achieve the appropriate level of transaction finality. The required finality
+level depends on whether you use Fast Transfer or Standard Transfer.
+
+* Fast Transfer: Attestations are issued after the transaction is confirmed and
+  included in a block, typically in seconds. Because of the faster finality
+  time, Fast Transfers are subject to a global allowance to mitigate
+  reorganization risks.
+* Standard Transfer: Attestations are issued after hard finality, when the
+  transaction is unlikely to be reversed by a chain reorganization, typically in
+  minutes.
+
+## Fast Transfer attestation times
+
+The table below shows the average time for attestations to become available when
+using Fast Transfer (`minFinalityThreshold` ≤ 1000):
+
+| Source blockchain | Block confirmations | Average time |
+| ----------------- | ------------------- | ------------ |
+| **Ethereum**      | 2                   | \~20 seconds |
+| **Arbitrum**      | 1                   | \~8 seconds  |
+| **Base**          | 1                   | \~8 seconds  |
+| **Codex**         | 1                   | \~8 seconds  |
+| **EDGE**          | 1                   | \~8 seconds  |
+| **Ink**           | 1                   | \~8 seconds  |
+| **Linea**         | 1                   | \~8 seconds  |
+| **Morph**         | 1                   | \~8 seconds  |
+| **OP Mainnet**    | 1                   | \~8 seconds  |
+| **Plume**         | 1                   | \~8 seconds  |
+| **Solana**        | 2-3                 | \~8 seconds  |
+| **Starknet**      | 4                   | \~20 seconds |
+| **Unichain**      | 1                   | \~8 seconds  |
+| **World Chain**   | 1                   | \~8 seconds  |
+
+<Note>
+  **Blockchains without Fast Transfer:**
+
+  Some blockchains don't support Fast Transfer as a source blockchain because
+  their standard attestation times are already fast. For those
+  [CCTP supported blockchains](/cctp/concepts/supported-chains-and-domains) where
+  Fast Transfer is disabled as a source, use Standard Transfer instead.
+</Note>
+
+## Standard Transfer attestation times
+
+The table below shows the average time for attestations to become available when
+using Standard Transfer (`minFinalityThreshold` ≥ 2000):
+
+| Source blockchain   | Block confirmations | Average time    |
+| ------------------- | ------------------- | --------------- |
+| **Ethereum**        | \~65                | \~15-19 minutes |
+| **Arbitrum**        | \~65 ETH blocks     | \~15-19 minutes |
+| **Arc Testnet**     | 1                   | \~0.5 seconds   |
+| **Avalanche**       | 1                   | \~8 seconds     |
+| **Base**            | \~65 ETH blocks     | \~15-19 minutes |
+| **BNB Smart Chain** | 3                   | \~2 seconds     |
+| **Codex**           | \~65 ETH blocks     | \~15-19 minutes |
+| **EDGE**            | \~65 ETH blocks     | \~16-21 minutes |
+| **HyperEVM**        | 1                   | \~5 seconds     |
+| **Injective**       | 1                   | \~0.65 seconds  |
+| **Ink**             | \~65 ETH blocks     | \~30 minutes    |
+| **Linea**           | 1                   | \~6-32 hours    |
+| **Monad**           | 1                   | \~5 seconds     |
+| **Morph**           | \~65 ETH blocks     | \~20-30 minutes |
+| **OP Mainnet**      | \~65 ETH blocks     | \~15-19 minutes |
+| **Pharos**          | 1                   | \~7 seconds     |
+| **Plume**           | \~65 ETH blocks     | \~15-19 minutes |
+| **Polygon PoS**     | 2-3                 | \~8 seconds     |
+| **Sei**             | 1                   | \~5 seconds     |
+| **Solana**          | 32                  | \~25 seconds    |
+| **Sonic**           | 1                   | \~8 seconds     |
+| **Starknet**        | \~65 ETH Blocks     | \~4 to 8 hours  |
+| **Stellar**         | 1                   | \~5 seconds     |
+| **Unichain**        | \~65 ETH blocks     | \~15-19 minutes |
+| **World Chain**     | \~65 ETH blocks     | \~15-19 minutes |
+| **XDC**             | 3                   | \~10 seconds    |
+
+## Layer 2 finality
+
+Layer 2 (L2) blockchains built on Ethereum publish transaction data in batches
+to Ethereum Layer 1. The finality characteristics of L2 chains depend on when
+batches are posted and when those batches achieve finality on Ethereum L1.
+
+<CardGroup cols={2}>
+  <Card title="OP Stack chains" icon="layer-group">
+    OP Stack-based chains (including Base, OP Mainnet, and World Chain) post
+    state updates using [EIP-4844](https://www.eip4844.com/) blob transactions
+    approximately every 15 minutes. Circle waits for the Ethereum L1 block
+    containing the batch to finalize, which typically takes \~65 blocks (15-19
+    minutes) after the batch is posted.
+  </Card>
+
+  <Card title="Linea" icon="clock">
+    Linea has a longer finality period compared to other L2 chains. Standard
+    Transfer on Linea typically requires 6-32 hours before attestations become
+    available.
+  </Card>
+
+  <Card title="Starknet" icon="clock">
+    The typical time to reach hard finality on Starknet is 4–8 hours, as finality
+    depends on when the zk-rollup proof is posted to Ethereum and when its
+    corresponding L1 block finalizes.
+  </Card>
+</CardGroup>
+
+## Solana finality
+
+Solana uses a different finality model:
+
+<CardGroup cols={2}>
+  <Card title="Fast Transfer" icon="bolt">
+    Circle waits for the block to be confirmed (votes from validators
+    representing over two-thirds of total stake). This typically takes 2-3
+    blocks (\~8 seconds).
+  </Card>
+
+  <Card title="Standard Transfer" icon="shield-check">
+    Circle waits for block finality, which takes 32 blocks (\~25 seconds).
+  </Card>
+</CardGroup>

@@ -1,0 +1,2280 @@
+const DECIMALS_EVM = 6n;
+const DECIMALS_STELLAR = 7n;
+const ZERO_BYTES32 = new Uint8Array(32);
+const ZERO_BYTES32_HEX = `0x${"00".repeat(32)}`;
+const CIRCLE_FORWARD_HOOK =
+  "0x636374702d666f72776172640000000000000000000000000000000000000000";
+const TIMEOUT_SECONDS = 180;
+const WALLETCONNECT_PROJECT_ID = "f658ce3a7c8a185214974f71539fea39";
+const VAULT_SIGNER_KEY = "GA2T6GR7VXXXBETTERSAFETHANSORRYXXXPROTECTEDBYLOBSTRVAULT";
+
+let StellarSdk = null;
+let SignClient = null;
+let viem = null;
+
+async function loadStellarSdk() {
+  if (StellarSdk) return StellarSdk;
+  const module = await import("https://esm.sh/@stellar/stellar-sdk@13.2.0?bundle");
+  StellarSdk = module.default ?? module;
+  return StellarSdk;
+}
+
+async function loadSignClient() {
+  if (SignClient) return SignClient;
+  const module = await import("https://esm.sh/@walletconnect/sign-client@2.21.8?target=es2022");
+  SignClient = module.default ?? module;
+  return SignClient;
+}
+
+async function loadViem() {
+  if (viem) return viem;
+  viem = await import("https://esm.sh/viem@2.38.5");
+  return viem;
+}
+
+const EVM_CONTRACTS = {
+  testnet: {
+    tokenMessenger: "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA",
+    messageTransmitter: "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275",
+  },
+  mainnet: {
+    tokenMessenger: "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+    messageTransmitter: "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+  },
+};
+
+const NETWORKS = {
+  testnet: {
+    label: "Testnet",
+    irisApiUrl: "https://iris-api-sandbox.circle.com",
+    stellar: {
+      id: "stellar-testnet",
+      kind: "stellar",
+      label: "Stellar Testnet",
+      shortLabel: "Stellar",
+      domain: 27,
+      sourceStandard: true,
+      sourceFast: true,
+      forwardingDestination: false,
+      networkPassphrase: "Test SDF Network ; September 2015",
+      horizonUrl: "https://horizon-testnet.stellar.org",
+      sorobanRpcUrl: "https://soroban-testnet.stellar.org",
+      explorerTx: "https://stellar.expert/explorer/testnet/tx/",
+      tokenMessengerMinter: "CDNG7HXAPBWICI2E3AUBP3YZWZELJLYSB6F5CC7WLDTLTHVM74SLRTHP",
+      messageTransmitter: "CBJ6MTCKKZG73PMDZCJMSFRD7DQEMI4FKDH7CGDSV4W6FHCRBCQAVVJY",
+      cctpForwarder: "CA66Q2WFBND6V4UEB7RD4SAXSVIWMD6RA4X3U32ELVFGXV5PJK4T4VSZ",
+      usdcContract: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+    },
+    evm: [
+      {
+        id: "base-sepolia",
+        label: "Base Sepolia",
+        shortLabel: "Base",
+        kind: "evm",
+        domain: 6,
+        chainId: 84532,
+        symbol: "ETH",
+        rpcUrl: "https://sepolia.base.org",
+        explorerTx: "https://sepolia.basescan.org/tx/",
+        usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        sourceStandard: true,
+        sourceFast: true,
+        forwardingDestination: true,
+      },
+      {
+        id: "ethereum-sepolia",
+        label: "Ethereum Sepolia",
+        shortLabel: "Ethereum",
+        kind: "evm",
+        domain: 0,
+        chainId: 11155111,
+        symbol: "ETH",
+        rpcUrl: "https://ethereum-sepolia-rpc.publicnode.com",
+        explorerTx: "https://sepolia.etherscan.io/tx/",
+        usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+        sourceStandard: true,
+        sourceFast: true,
+        forwardingDestination: true,
+      },
+      {
+        id: "arbitrum-sepolia",
+        label: "Arbitrum Sepolia",
+        shortLabel: "Arbitrum",
+        kind: "evm",
+        domain: 3,
+        chainId: 421614,
+        symbol: "ETH",
+        rpcUrl: "https://sepolia-rollup.arbitrum.io/rpc",
+        explorerTx: "https://sepolia.arbiscan.io/tx/",
+        usdc: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+        sourceStandard: true,
+        sourceFast: true,
+        forwardingDestination: true,
+      },
+      {
+        id: "op-sepolia",
+        label: "OP Sepolia",
+        shortLabel: "OP",
+        kind: "evm",
+        domain: 2,
+        chainId: 11155420,
+        symbol: "ETH",
+        rpcUrl: "https://sepolia.optimism.io",
+        explorerTx: "https://sepolia-optimism.etherscan.io/tx/",
+        usdc: "0x5fd84259d66Cd46123540766Be93DFE6D43130D7",
+        sourceStandard: true,
+        sourceFast: true,
+        forwardingDestination: true,
+      },
+      {
+        id: "avalanche-fuji",
+        label: "Avalanche Fuji",
+        shortLabel: "Fuji",
+        kind: "evm",
+        domain: 1,
+        chainId: 43113,
+        symbol: "AVAX",
+        rpcUrl: "https://api.avax-test.network/ext/bc/C/rpc",
+        explorerTx: "https://testnet.snowtrace.io/tx/",
+        usdc: "0x5425890298aed601595a70AB815c96711a31Bc65",
+        sourceStandard: true,
+        sourceFast: false,
+        forwardingDestination: true,
+      },
+      {
+        id: "polygon-amoy",
+        label: "Polygon Amoy",
+        shortLabel: "Polygon",
+        kind: "evm",
+        domain: 7,
+        chainId: 80002,
+        symbol: "POL",
+        rpcUrl: "https://rpc-amoy.polygon.technology",
+        explorerTx: "https://amoy.polygonscan.com/tx/",
+        usdc: "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582",
+        sourceStandard: true,
+        sourceFast: false,
+        forwardingDestination: true,
+      },
+    ],
+  },
+  mainnet: {
+    label: "Mainnet",
+    irisApiUrl: "https://iris-api.circle.com",
+    stellar: {
+      id: "stellar",
+      kind: "stellar",
+      label: "Stellar",
+      shortLabel: "Stellar",
+      domain: 27,
+      sourceStandard: true,
+      sourceFast: true,
+      forwardingDestination: false,
+      networkPassphrase: "Public Global Stellar Network ; September 2015",
+      horizonUrl: "https://horizon.stellar.org",
+      sorobanRpcUrl: "https://mainnet.sorobanrpc.com",
+      explorerTx: "https://stellar.expert/explorer/public/tx/",
+      tokenMessengerMinter: "CAE2G5Z77UP7GYPYGFOWFGW7C7J6I4YP2AFGSADRKQY62SYUFLPNFTXL",
+      messageTransmitter: "CACMENFFJPJMSDAJQLX4R7K3SFZIW2LJSE3R2UMLGSWHFHS353FVXAZV",
+      cctpForwarder: "CBZL2IH7F6BIDAA3WBNXYKIXSATJGMSW7K5P5MJ6STX5RXN47TZJDF5T",
+      usdcContract: "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+    },
+    evm: [
+      {
+        id: "base",
+        label: "Base",
+        shortLabel: "Base",
+        kind: "evm",
+        domain: 6,
+        chainId: 8453,
+        symbol: "ETH",
+        rpcUrl: "https://mainnet.base.org",
+        explorerTx: "https://basescan.org/tx/",
+        usdc: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        sourceStandard: true,
+        sourceFast: true,
+        forwardingDestination: true,
+      },
+      {
+        id: "ethereum",
+        label: "Ethereum",
+        shortLabel: "Ethereum",
+        kind: "evm",
+        domain: 0,
+        chainId: 1,
+        symbol: "ETH",
+        rpcUrl: "https://ethereum-rpc.publicnode.com",
+        explorerTx: "https://etherscan.io/tx/",
+        usdc: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        sourceStandard: true,
+        sourceFast: true,
+        forwardingDestination: true,
+      },
+      {
+        id: "arbitrum",
+        label: "Arbitrum",
+        shortLabel: "Arbitrum",
+        kind: "evm",
+        domain: 3,
+        chainId: 42161,
+        symbol: "ETH",
+        rpcUrl: "https://arb1.arbitrum.io/rpc",
+        explorerTx: "https://arbiscan.io/tx/",
+        usdc: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        sourceStandard: true,
+        sourceFast: true,
+        forwardingDestination: true,
+      },
+      {
+        id: "op",
+        label: "OP Mainnet",
+        shortLabel: "OP",
+        kind: "evm",
+        domain: 2,
+        chainId: 10,
+        symbol: "ETH",
+        rpcUrl: "https://mainnet.optimism.io",
+        explorerTx: "https://optimistic.etherscan.io/tx/",
+        usdc: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+        sourceStandard: true,
+        sourceFast: true,
+        forwardingDestination: true,
+      },
+      {
+        id: "avalanche",
+        label: "Avalanche",
+        shortLabel: "Avax",
+        kind: "evm",
+        domain: 1,
+        chainId: 43114,
+        symbol: "AVAX",
+        rpcUrl: "https://api.avax.network/ext/bc/C/rpc",
+        explorerTx: "https://snowtrace.io/tx/",
+        usdc: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+        sourceStandard: true,
+        sourceFast: false,
+        forwardingDestination: true,
+      },
+      {
+        id: "polygon",
+        label: "Polygon PoS",
+        shortLabel: "Polygon",
+        kind: "evm",
+        domain: 7,
+        chainId: 137,
+        symbol: "POL",
+        rpcUrl: "https://polygon-rpc.com",
+        explorerTx: "https://polygonscan.com/tx/",
+        usdc: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+        sourceStandard: true,
+        sourceFast: false,
+        forwardingDestination: true,
+      },
+    ],
+  },
+};
+
+const ids = [
+  "toastWrap",
+  "networkBadge",
+  "routeSubtitle",
+  "resetBtn",
+  "sourceChain",
+  "destChain",
+  "swapRouteBtn",
+  "amountInput",
+  "recipientInput",
+  "sourceWalletBtn",
+  "sourceWalletTitle",
+  "sourceWalletMeta",
+  "destWalletBtn",
+  "destWalletTitle",
+  "destWalletMeta",
+  "useConnectedRecipientBtn",
+  "refreshQuoteBtn",
+  "refreshAllowanceBtn",
+  "fastBtn",
+  "fastMeta",
+  "standardBtn",
+  "forwardingToggleWrap",
+  "forwardingToggle",
+  "feeBufferInput",
+  "routeNotice",
+  "routeNoticeTitle",
+  "routeNoticeText",
+  "quoteStatus",
+  "burnAmountOut",
+  "receiveAmountOut",
+  "feeEstimateOut",
+  "maxFeeOut",
+  "forwardFeeOut",
+  "protocolFeeOut",
+  "quoteNote",
+  "mainActionBtn",
+  "mainHelper",
+  "timeline",
+  "successPanel",
+  "successText",
+  "successApproveTx",
+  "successBurnTx",
+  "successReceiveTx",
+  "copySummaryBtn",
+  "testnetBtn",
+  "mainnetBtn",
+  "envOut",
+  "mainnetArmedOut",
+  "armMainnetBtn",
+  "stellarConnOut",
+  "evmConnOut",
+  "vaultModeOut",
+  "sourceDomainOut",
+  "destDomainOut",
+  "deliveryOut",
+  "allowanceOut",
+  "routeModelNote",
+  "tokenMessengerOut",
+  "messageTransmitterOut",
+  "forwarderOut",
+  "usdcOut",
+  "advancedToggle",
+  "advancedArea",
+  "burnHashInput",
+  "nonceInput",
+  "fetchMessageBtn",
+  "resumePollingBtn",
+  "verifyAttestationBtn",
+  "reattestBtn",
+  "messageText",
+  "attestationText",
+  "useAttestationBtn",
+  "manualReceiveBtn",
+  "logBox",
+  "backdrop",
+  "connectModal",
+  "connectTitle",
+  "connectSubtitle",
+  "connectOptions",
+  "qrArea",
+  "qrCanvas",
+  "qrFallback",
+  "openMobileWalletBtn",
+  "copyWcBtn",
+  "qrStatus",
+  "manualArea",
+  "manualLabel",
+  "manualAddressInput",
+  "useManualAddressBtn",
+  "signingModal",
+  "signingTitle",
+  "signingText",
+  "signingStatus",
+  "signingSubtext",
+  "openSigningWalletBtn",
+  "copySigningLinkBtn",
+];
+
+const el = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
+
+const state = {
+  env: "testnet",
+  mainnetArmed: false,
+  sourceId: "stellar-testnet",
+  destId: "base-sepolia",
+  speed: "fast",
+  useCircleForwarding: true,
+  feeBufferPct: 20,
+  busy: false,
+  connectTarget: "source",
+  connectKind: "stellar",
+  wcUri: "",
+  stellar: {
+    address: "",
+    mode: "none",
+    wc: null,
+    session: null,
+    wcUri: "",
+    needsVault: false,
+  },
+  evm: {
+    address: "",
+    mode: "none",
+    chainId: null,
+    provider: null,
+    wc: null,
+    session: null,
+    wcUri: "",
+  },
+  quote: blankQuote(),
+  allowance: { status: "idle", allowance6: null, lastUpdated: "" },
+  flow: blankFlow(),
+  pollTimer: null,
+  pollCount: 0,
+};
+
+const announcedEvmProviders = [];
+
+if (typeof window !== "undefined") {
+  window.addEventListener("eip6963:announceProvider", rememberAnnouncedEvmProvider);
+  window.dispatchEvent(new Event("eip6963:requestProvider"));
+}
+
+function blankQuote() {
+  return {
+    status: "idle",
+    row: null,
+    forwardFee6: 0n,
+    protocolFee6: 0n,
+    estimatedFee6: 0n,
+    maxFee6: 0n,
+    error: "",
+    fetchedAt: "",
+  };
+}
+
+function blankFlow() {
+  return {
+    transferId: makeTransferId(),
+    evmApproved: false,
+    stellarApproved: false,
+    burnSubmitted: false,
+    manualReceived: false,
+    autoDelivered: false,
+    approveTxHash: "",
+    burnTxHash: "",
+    receiveTxHash: "",
+    forwardTxHash: "",
+    messageHex: "",
+    attestationHex: "",
+    nonce: "",
+    statusText: "",
+    verified: "unknown",
+  };
+}
+
+function env() {
+  return NETWORKS[state.env];
+}
+
+function evmContracts() {
+  return EVM_CONTRACTS[state.env];
+}
+
+function chains() {
+  return [env().stellar, ...env().evm];
+}
+
+function sourceChain() {
+  return chains().find((chain) => chain.id === state.sourceId) ?? env().stellar;
+}
+
+function destChain() {
+  return chains().find((chain) => chain.id === state.destId) ?? env().evm[0];
+}
+
+function sourceIsStellar() {
+  return sourceChain().kind === "stellar";
+}
+
+function destIsStellar() {
+  return destChain().kind === "stellar";
+}
+
+function sourceIsEvm() {
+  return sourceChain().kind === "evm";
+}
+
+function destIsEvm() {
+  return destChain().kind === "evm";
+}
+
+function sourceDecimals() {
+  return sourceIsStellar() ? DECIMALS_STELLAR : DECIMALS_EVM;
+}
+
+function destDecimals() {
+  return destIsStellar() ? DECIMALS_STELLAR : DECIMALS_EVM;
+}
+
+function amountInputUnits() {
+  return parseUnits(el.amountInput.value, sourceDecimals());
+}
+
+function amount6() {
+  const units = amountInputUnits();
+  return sourceIsStellar() ? units / 10n : units;
+}
+
+function burnSourceUnits() {
+  const six = amount6();
+  return sourceIsStellar() ? six * 10n : six;
+}
+
+function feeSourceUnits(fee6) {
+  return sourceIsStellar() ? fee6 * 10n : fee6;
+}
+
+function receiveDestUnits() {
+  const receive6 = amount6() > state.quote.estimatedFee6 ? amount6() - state.quote.estimatedFee6 : 0n;
+  return destIsStellar() ? receive6 * 10n : receive6;
+}
+
+function sourceSignerConnected() {
+  if (sourceIsStellar()) return !!state.stellar.address && state.stellar.mode !== "manual";
+  return !!state.evm.address && state.evm.mode !== "manual";
+}
+
+function destSignerConnected() {
+  if (destIsStellar()) return !!state.stellar.address && state.stellar.mode !== "manual";
+  return !!state.evm.address && state.evm.mode !== "manual";
+}
+
+function destAddressAvailable() {
+  return destIsStellar() ? !!state.stellar.address : !!state.evm.address;
+}
+
+function recipientValid() {
+  const value = clean(el.recipientInput.value);
+  return destIsStellar() ? isStellarAddress(value) : isEvmAddress(value);
+}
+
+function sameDomainRoute() {
+  return sourceChain().domain === destChain().domain;
+}
+
+function minFinality() {
+  return state.speed === "fast" ? 1000 : 2000;
+}
+
+function canUseFast() {
+  return !!sourceChain().sourceFast;
+}
+
+function usesStellarForwarder() {
+  return destIsStellar();
+}
+
+function circleForwardingAvailable() {
+  return sourceIsEvm() && destIsEvm() && !!destChain().forwardingDestination;
+}
+
+function usesCircleForwarding() {
+  return circleForwardingAvailable() && state.useCircleForwarding;
+}
+
+function needsFeeQuote() {
+  return state.speed === "fast" || usesCircleForwarding();
+}
+
+function feeQuoteReady() {
+  return !needsFeeQuote() || state.quote.status === "ready";
+}
+
+function fastAllowanceOk() {
+  if (state.speed !== "fast") return true;
+  if (!canUseFast()) return false;
+  if (state.allowance.status !== "ready") return false;
+  return amount6() <= (state.allowance.allowance6 ?? 0n);
+}
+
+function mainnetBlocked() {
+  return state.env === "mainnet" && !state.mainnetArmed;
+}
+
+function currentAction() {
+  if (sameDomainRoute()) {
+    return {
+      label: "Choose different domains",
+      helper: "CCTP routes must move between different Circle domains.",
+      disabled: true,
+      active: 0,
+    };
+  }
+  if (mainnetBlocked()) {
+    return {
+      label: "Mainnet locked",
+      helper: "Arm mainnet actions before signing transactions with real USDC.",
+      disabled: true,
+      active: 0,
+    };
+  }
+  if (!sourceSignerConnected()) {
+    return {
+      label: sourceIsStellar() ? "Connect Stellar source" : "Connect EVM source",
+      helper: "Connect a signing wallet for the source chain.",
+      fn: () => openConnect("source"),
+      active: 0,
+    };
+  }
+  if (burnSourceUnits() <= 0n) {
+    return {
+      label: "Enter amount",
+      helper: "Enter the USDC amount to burn on the source chain.",
+      disabled: true,
+      active: 0,
+    };
+  }
+  if (!recipientValid()) {
+    return {
+      label: "Add recipient",
+      helper: destIsStellar()
+        ? "Paste a valid Stellar G, M, or C recipient."
+        : "Paste a valid EVM 0x recipient.",
+      disabled: true,
+      active: 0,
+    };
+  }
+  if (!canUseFast() && state.speed === "fast") {
+    return {
+      label: "Use Standard",
+      helper: "Fast Transfer is not available from this source chain.",
+      disabled: true,
+      active: 1,
+    };
+  }
+  if (needsFeeQuote() && state.quote.status !== "ready") {
+    return {
+      label: "Refresh quote",
+      helper: "Fetch Circle fees before approving and burning.",
+      fn: refreshQuote,
+      active: 1,
+    };
+  }
+  if (state.speed === "fast" && state.allowance.status !== "ready") {
+    return {
+      label: "Check fast allowance",
+      helper: "Check Circle's Fast Transfer allowance before signing.",
+      fn: refreshAllowance,
+      active: 1,
+    };
+  }
+  if (!fastAllowanceOk()) {
+    return {
+      label: "Fast allowance too low",
+      helper: "Switch to Standard or reduce the amount.",
+      disabled: true,
+      active: 1,
+    };
+  }
+  if (state.quote.maxFee6 >= amount6() && needsFeeQuote()) {
+    return {
+      label: "Amount too low for fees",
+      helper: "The quoted maxFee is greater than or equal to the burn amount.",
+      disabled: true,
+      active: 1,
+    };
+  }
+  if (sourceIsEvm()) {
+    if (!state.flow.evmApproved) {
+      return {
+        label: "Approve EVM USDC",
+        helper: `Approve ${fmt(burnSourceUnits(), DECIMALS_EVM)} for TokenMessengerV2.`,
+        fn: approveEvm,
+        active: 2,
+      };
+    }
+    if (!state.flow.burnSubmitted) {
+      return {
+        label: usesCircleForwarding() ? "Burn with auto-delivery" : "Burn EVM USDC",
+        helper: burnHelperText(),
+        fn: burnEvm,
+        active: 3,
+      };
+    }
+  } else {
+    if (!state.flow.stellarApproved) {
+      return {
+        label: "Approve Stellar USDC",
+        helper: `Approve ${fmt(burnSourceUnits(), DECIMALS_STELLAR)} for TokenMessengerMinter.`,
+        fn: approveStellar,
+        active: 2,
+      };
+    }
+    if (!state.flow.burnSubmitted) {
+      return {
+        label: usesCircleForwarding() ? "Burn with auto-delivery" : "Burn Stellar USDC",
+        helper: burnHelperText(),
+        fn: burnStellar,
+        active: 3,
+      };
+    }
+  }
+  if (usesCircleForwarding() && state.flow.autoDelivered) {
+    return doneAction();
+  }
+  if (usesCircleForwarding() && !state.flow.messageHex) {
+    return {
+      label: "Waiting for Circle",
+      helper: state.flow.statusText || "Burn submitted. Waiting for forwardTxHash or attestation.",
+      disabled: true,
+      active: 4,
+    };
+  }
+  if (!state.flow.messageHex || !state.flow.attestationHex) {
+    return {
+      label: "Waiting for attestation",
+      helper: state.flow.statusText || "Burn submitted. Fetch or wait for Circle attestation.",
+      disabled: true,
+      active: 4,
+    };
+  }
+  if (destIsEvm() && !state.flow.manualReceived && !state.flow.autoDelivered) {
+    if (!destSignerConnected()) {
+      return {
+        label: "Connect EVM receiver",
+        helper: "Connect an EVM signing wallet to retry receiveMessage manually.",
+        fn: () => openConnect("dest"),
+        active: 5,
+      };
+    }
+    return {
+      label: usesCircleForwarding() ? "Manual receive fallback" : `Receive on ${destChain().shortLabel}`,
+      helper: "Submit receiveMessage(message, attestation) on the destination MessageTransmitter.",
+      fn: receiveOnEvm,
+      active: 5,
+    };
+  }
+  if (destIsStellar() && !state.flow.manualReceived) {
+    if (!destSignerConnected()) {
+      return {
+        label: "Connect Stellar signer",
+        helper: "Connect any Stellar signer to call CctpForwarder.mint_and_forward.",
+        fn: () => openConnect("dest"),
+        active: 5,
+      };
+    }
+    return {
+      label: "Receive on Stellar",
+      helper: "Call CctpForwarder.mint_and_forward(message, attestation).",
+      fn: receiveOnStellar,
+      active: 5,
+    };
+  }
+  return doneAction();
+}
+
+function doneAction() {
+  return {
+    label: "Bridge complete",
+    helper: "Transfer complete.",
+    disabled: true,
+    active: 6,
+  };
+}
+
+function burnHelperText() {
+  if (usesCircleForwarding()) {
+    return `Burn ${fmt(burnSourceUnits(), sourceDecimals())}; Circle can deduct up to ${fmt(feeSourceUnits(state.quote.maxFee6), sourceDecimals())}.`;
+  }
+  if (usesStellarForwarder()) {
+    return "Destination is Stellar. The burn will target CctpForwarder with the Stellar recipient in hook data.";
+  }
+  return "Manual receive will be available after Circle signs the attestation.";
+}
+
+function populateChains() {
+  const oldSource = state.sourceId;
+  const oldDest = state.destId;
+  el.sourceChain.innerHTML = "";
+  el.destChain.innerHTML = "";
+  for (const chain of chains()) {
+    for (const select of [el.sourceChain, el.destChain]) {
+      const option = document.createElement("option");
+      option.value = chain.id;
+      option.textContent = chain.label;
+      select.appendChild(option);
+    }
+  }
+  state.sourceId = chains().some((chain) => chain.id === oldSource) ? oldSource : env().stellar.id;
+  state.destId = chains().some((chain) => chain.id === oldDest) ? oldDest : env().evm[0].id;
+  if (state.sourceId === state.destId) {
+    state.destId = env().evm.find((chain) => chain.id !== state.sourceId)?.id ?? env().stellar.id;
+  }
+  el.sourceChain.value = state.sourceId;
+  el.destChain.value = state.destId;
+}
+
+function updateUi() {
+  document.documentElement.classList.toggle("mainnet", state.env === "mainnet");
+  el.networkBadge.textContent = state.env === "mainnet" ? "Mainnet guarded" : "Testnet preview";
+  el.routeSubtitle.textContent = location.protocol === "file:"
+    ? "Route controls work here, but wallet extensions should be tested from http://localhost:4173/."
+    : "Choose a route and quote the transfer before signing.";
+  el.envOut.textContent = state.env;
+  el.mainnetArmedOut.textContent = String(state.mainnetArmed);
+  el.testnetBtn.classList.toggle("active", state.env === "testnet");
+  el.mainnetBtn.classList.toggle("active", state.env === "mainnet");
+  el.armMainnetBtn.textContent = state.mainnetArmed ? "Lock mainnet actions" : "Arm mainnet actions";
+
+  el.sourceChain.value = state.sourceId;
+  el.destChain.value = state.destId;
+  el.recipientInput.placeholder = destIsStellar() ? "G... / M... / C..." : "0x...";
+  el.forwardingToggleWrap.classList.toggle("hidden", !circleForwardingAvailable());
+  el.forwardingToggle.checked = state.useCircleForwarding;
+
+  el.sourceWalletTitle.textContent = sourceIsStellar() ? "Connect Stellar source" : "Connect EVM source";
+  el.sourceWalletMeta.textContent = sourceIsStellar()
+    ? walletMeta(state.stellar)
+    : walletMeta(state.evm);
+  el.destWalletTitle.textContent = destIsStellar() ? "Connect Stellar receiver" : "Connect EVM receiver";
+  el.destWalletMeta.textContent = destIsStellar()
+    ? walletMeta(state.stellar, "Optional autofill")
+    : walletMeta(state.evm, "Optional autofill");
+  el.sourceWalletBtn.classList.toggle("good", sourceSignerConnected());
+  el.destWalletBtn.classList.toggle("good", destAddressAvailable());
+  el.useConnectedRecipientBtn.disabled = !destAddressAvailable();
+
+  if (state.speed === "fast" && !canUseFast()) state.speed = "standard";
+  el.fastBtn.disabled = !canUseFast();
+  el.fastBtn.classList.toggle("active", state.speed === "fast");
+  el.standardBtn.classList.toggle("active", state.speed === "standard");
+  el.fastMeta.textContent = canUseFast()
+    ? "Confirmed finality, fee applies."
+    : "Fast is unavailable from this source.";
+
+  const routeInfo = getRouteNotice();
+  el.routeNotice.className = `notice ${routeInfo.tone}`;
+  el.routeNoticeTitle.textContent = routeInfo.title;
+  el.routeNoticeText.textContent = routeInfo.text;
+
+  el.quoteStatus.textContent = quoteStatusLabel();
+  el.burnAmountOut.textContent = fmt(burnSourceUnits(), sourceDecimals());
+  el.receiveAmountOut.textContent = fmt(receiveDestUnits(), destDecimals());
+  el.feeEstimateOut.textContent = fmt(feeSourceUnits(state.quote.estimatedFee6), sourceDecimals());
+  el.maxFeeOut.textContent = fmt(feeSourceUnits(state.quote.maxFee6), sourceDecimals());
+  el.forwardFeeOut.textContent = state.quote.forwardFee6 ? fmt(feeSourceUnits(state.quote.forwardFee6), sourceDecimals()) : "-";
+  el.protocolFeeOut.textContent = state.quote.protocolFee6 ? fmt(feeSourceUnits(state.quote.protocolFee6), sourceDecimals()) : "-";
+  el.quoteNote.textContent = quoteNote();
+
+  el.stellarConnOut.textContent = state.stellar.address ? `${state.stellar.mode} ${short(state.stellar.address)}` : "Not connected";
+  el.evmConnOut.textContent = state.evm.address ? `${state.evm.mode} ${short(state.evm.address)}` : "Not connected";
+  el.vaultModeOut.textContent = state.stellar.needsVault ? "Likely required" : state.stellar.address ? "Not detected" : "Unknown";
+  el.sourceDomainOut.textContent = String(sourceChain().domain);
+  el.destDomainOut.textContent = String(destChain().domain);
+  el.deliveryOut.textContent = deliveryLabel();
+  el.allowanceOut.textContent = allowanceLabel();
+  el.routeModelNote.textContent = routeModelNote();
+  el.tokenMessengerOut.textContent = sourceIsStellar()
+    ? short(env().stellar.tokenMessengerMinter)
+    : short(evmContracts().tokenMessenger);
+  el.messageTransmitterOut.textContent = destIsStellar()
+    ? short(env().stellar.messageTransmitter)
+    : short(evmContracts().messageTransmitter);
+  el.forwarderOut.textContent = short(env().stellar.cctpForwarder);
+  el.usdcOut.textContent = sourceIsStellar() ? short(env().stellar.usdcContract) : short(sourceChain().usdc);
+
+  const action = currentAction();
+  el.mainActionBtn.textContent = state.busy ? "Working..." : action.label;
+  el.mainActionBtn.disabled = state.busy || !!action.disabled;
+  el.mainHelper.textContent = action.helper;
+  updateTimeline(action.active);
+  updateSuccess();
+}
+
+function walletMeta(wallet, fallback = "Required") {
+  if (!wallet.address) return fallback;
+  return `${wallet.mode} ${short(wallet.address)}`;
+}
+
+function getRouteNotice() {
+  if (sameDomainRoute()) {
+    return {
+      tone: "bad",
+      title: "Invalid route",
+      text: "Source and destination must be different CCTP domains.",
+    };
+  }
+  if (usesStellarForwarder()) {
+    return {
+      tone: "warn",
+      title: "Stellar destination requires CctpForwarder",
+      text: "The burn sets both mintRecipient and destinationCaller to CctpForwarder, with the final Stellar recipient encoded in hook data.",
+    };
+  }
+  if (usesCircleForwarding()) {
+    return {
+      tone: "good",
+      title: "Circle Forwarding Service route",
+      text: "The burn uses the cctp-forward hook. Completion is only marked when Iris returns a forwardTxHash, or when manual receive succeeds.",
+    };
+  }
+  return {
+    tone: "warn",
+    title: "Manual receive route",
+    text: "Circle signs the attestation, then a signer submits receiveMessage on the destination chain.",
+  };
+}
+
+function quoteStatusLabel() {
+  if (!needsFeeQuote()) return "No fee quote required";
+  if (state.quote.status === "ready") return `Quoted ${state.quote.fetchedAt}`;
+  if (state.quote.status === "fetching") return "Fetching...";
+  if (state.quote.status === "error") return "Quote failed";
+  return "Not quoted";
+}
+
+function quoteNote() {
+  const six = amount6();
+  if (sourceIsStellar() && amountInputUnits() !== burnSourceUnits()) {
+    return "Stellar burns only through the sixth decimal for CCTP. Any seventh decimal dust stays in the source account.";
+  }
+  if (needsFeeQuote() && state.quote.status !== "ready") {
+    return state.quote.error || "Refresh the quote immediately before signing.";
+  }
+  if (usesCircleForwarding()) {
+    return `You send ${fmt(burnSourceUnits(), sourceDecimals())}. Estimated receive is ${fmt(receiveDestUnits(), destDecimals())}; maxFee includes a ${state.feeBufferPct}% buffer.`;
+  }
+  if (state.speed === "fast") {
+    return `Fast Transfer fee is deducted on mint. Estimated receive is ${fmt(receiveDestUnits(), destDecimals())}.`;
+  }
+  if (six > 0n) return "Standard Transfer uses hard finality and generally has no CCTP protocol fee.";
+  return "Enter an amount to calculate the route.";
+}
+
+function deliveryLabel() {
+  if (usesCircleForwarding()) return "Circle auto-delivery";
+  if (usesStellarForwarder()) return "Stellar CctpForwarder";
+  return "Manual receive";
+}
+
+function allowanceLabel() {
+  if (state.speed !== "fast") return "Not needed";
+  if (state.allowance.status === "ready") return `${fmt(state.allowance.allowance6 ?? 0n, DECIMALS_EVM)} left`;
+  if (state.allowance.status === "fetching") return "Checking...";
+  if (state.allowance.status === "error") return "Failed";
+  return "Not checked";
+}
+
+function routeModelNote() {
+  if (destIsStellar()) {
+    return "Stellar address type is preserved by CctpForwarder hook data. Never mint directly to a user G or M address.";
+  }
+  if (usesCircleForwarding()) {
+    return "If Circle auto-delivery stalls, the same message and attestation can be used for manual receive on EVM.";
+  }
+  return "The app keeps the message and attestation available so a failed mint can be retried safely.";
+}
+
+function updateTimeline(activeIndex) {
+  const items = [
+    {
+      title: "Setup",
+      text: sourceSignerConnected() && recipientValid() ? "Source signer and recipient ready" : "Connect source and add recipient",
+      done: sourceSignerConnected() && burnSourceUnits() > 0n && recipientValid(),
+    },
+    {
+      title: "Quote and allowance",
+      text: feeQuoteReady() && fastAllowanceOk() ? "Route checks ready" : "Fetch fees and allowance",
+      done: feeQuoteReady() && fastAllowanceOk(),
+      warn: state.quote.status === "error" || state.allowance.status === "error",
+    },
+    {
+      title: "Approve",
+      text: sourceIsStellar()
+        ? state.flow.stellarApproved ? "Stellar USDC approved" : "Approve TokenMessengerMinter"
+        : state.flow.evmApproved ? "EVM USDC approved" : "Approve TokenMessengerV2",
+      done: sourceIsStellar() ? state.flow.stellarApproved : state.flow.evmApproved,
+    },
+    {
+      title: "Burn",
+      text: state.flow.burnSubmitted ? "Burn submitted" : "Burn source USDC",
+      done: state.flow.burnSubmitted,
+    },
+    {
+      title: usesCircleForwarding() ? "Forward or attest" : "Attestation",
+      text: state.flow.autoDelivered
+        ? "Forward transaction detected"
+        : state.flow.messageHex && state.flow.attestationHex
+          ? "Attestation ready"
+          : state.flow.statusText || "Waiting for Circle",
+      done: state.flow.autoDelivered || !!(state.flow.messageHex && state.flow.attestationHex),
+      warn: state.flow.burnSubmitted && !state.flow.messageHex && state.flow.statusText,
+    },
+    {
+      title: "Receive",
+      text: state.flow.autoDelivered
+        ? "Auto-delivered"
+        : state.flow.manualReceived
+          ? "Manual receive complete"
+          : state.flow.messageHex
+            ? "Manual receive available"
+            : "Waiting",
+      done: state.flow.autoDelivered || state.flow.manualReceived,
+    },
+  ];
+
+  el.timeline.innerHTML = items
+    .map((item, index) => {
+      const cls = item.done ? "done" : item.warn ? "warn" : index === activeIndex ? "active" : "";
+      const mark = item.done ? "ok" : String(index + 1);
+      return `<div class="step ${cls}"><div class="step-mark">${esc(mark)}</div><div><strong>${esc(item.title)}</strong><span>${esc(item.text)}</span></div></div>`;
+    })
+    .join("");
+}
+
+function updateSuccess() {
+  const complete = state.flow.autoDelivered || state.flow.manualReceived;
+  el.successPanel.classList.toggle("open", complete);
+  el.successText.textContent = state.flow.autoDelivered
+    ? "Circle Forwarding Service delivery was detected with a destination transaction hash."
+    : "Manual receive completed.";
+  el.successApproveTx.innerHTML = txLink(state.flow.approveTxHash, sourceChain());
+  el.successBurnTx.innerHTML = txLink(state.flow.burnTxHash, sourceChain());
+  el.successReceiveTx.innerHTML = txLink(state.flow.forwardTxHash || state.flow.receiveTxHash, destChain());
+}
+
+async function refreshQuote() {
+  state.quote = blankQuote();
+  if (!needsFeeQuote()) {
+    state.quote.status = "ready";
+    updateUi();
+    return;
+  }
+  if (amount6() <= 0n) {
+    state.quote.status = "idle";
+    toast("info", "Amount needed", "Enter an amount before quoting fees.");
+    updateUi();
+    return;
+  }
+  state.quote.status = "fetching";
+  updateUi();
+  try {
+    const forward = usesCircleForwarding() ? "?forward=true" : "";
+    const url = `${env().irisApiUrl}/v2/burn/USDC/fees/${sourceChain().domain}/${destChain().domain}${forward}`;
+    const response = await fetch(url, { headers: { "Content-Type": "application/json" } });
+    const json = await response.json();
+    log("Fee response", json);
+    if (!response.ok) throw new Error(json?.message || `Circle fee API ${response.status}`);
+    const rows = Array.isArray(json) ? json : Object.values(json?.fees ?? json?.data ?? {});
+    const row = rows.find((candidate) => Number(candidate.finalityThreshold ?? candidate.finality_threshold) === minFinality()) ?? rows[0];
+    if (!row) throw new Error("Circle returned no fee rows for this route.");
+    const forwardFee = usesCircleForwarding() ? pickForwardFee(row.forwardFee ?? row.forward_fee ?? {}) : 0n;
+    const protocolFee = state.speed === "fast" ? calculateProtocolFee(amount6(), row.minimumFee ?? row.minimum_fee ?? 0) : 0n;
+    const estimatedFee = forwardFee + protocolFee;
+    state.quote = {
+      status: "ready",
+      row,
+      forwardFee6: forwardFee,
+      protocolFee6: protocolFee,
+      estimatedFee6: estimatedFee,
+      maxFee6: applyBuffer(estimatedFee, state.feeBufferPct),
+      error: "",
+      fetchedAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+    toast("ok", "Quote ready", `Estimated receive ${fmt(receiveDestUnits(), destDecimals())}`);
+  } catch (error) {
+    state.quote.status = "error";
+    state.quote.error = errorMessage(error);
+    toast("err", "Quote failed", state.quote.error, 7000);
+  } finally {
+    updateUi();
+  }
+}
+
+async function refreshAllowance() {
+  if (state.speed !== "fast") {
+    state.allowance = { status: "idle", allowance6: null, lastUpdated: "" };
+    updateUi();
+    return;
+  }
+  state.allowance.status = "fetching";
+  updateUi();
+  try {
+    const response = await fetch(`${env().irisApiUrl}/v2/fastBurn/USDC/allowance`);
+    const json = await response.json();
+    log("Fast allowance response", json);
+    if (!response.ok) throw new Error(json?.message || `Circle allowance API ${response.status}`);
+    state.allowance = {
+      status: "ready",
+      allowance6: parseUnits(String(json.allowance ?? "0"), DECIMALS_EVM),
+      lastUpdated: json.lastUpdated ?? "",
+    };
+    toast("ok", "Fast allowance checked", allowanceLabel());
+  } catch (error) {
+    state.allowance.status = "error";
+    toast("err", "Allowance check failed", errorMessage(error), 7000);
+  } finally {
+    updateUi();
+  }
+}
+
+async function approveEvm() {
+  const { encodeFunctionData, parseAbi } = await loadViem();
+  await switchEvm(sourceChain());
+  const data = encodeFunctionData({
+    abi: parseAbi(["function approve(address spender,uint256 amount) returns (bool)"]),
+    functionName: "approve",
+    args: [evmContracts().tokenMessenger, burnSourceUnits()],
+  });
+  const txHash = await evmSend({ from: state.evm.address, to: sourceChain().usdc, data });
+  state.flow.approveTxHash = txHash;
+  state.flow.evmApproved = true;
+  toast("ok", "EVM approval submitted", short(txHash));
+}
+
+async function burnEvm() {
+  const { encodeFunctionData, parseAbi } = await loadViem();
+  await switchEvm(sourceChain());
+  const { mintRecipient, destinationCaller, hookData } = await evmBurnDestination();
+  const data = encodeFunctionData({
+    abi: parseAbi([
+      "function depositForBurnWithHook(uint256 amount,uint32 destinationDomain,bytes32 mintRecipient,address burnToken,bytes32 destinationCaller,uint256 maxFee,uint32 minFinalityThreshold,bytes hookData) returns (uint64)",
+    ]),
+    functionName: "depositForBurnWithHook",
+    args: [
+      burnSourceUnits(),
+      destChain().domain,
+      mintRecipient,
+      sourceChain().usdc,
+      destinationCaller,
+      state.quote.maxFee6,
+      minFinality(),
+      hookData,
+    ],
+  });
+  const txHash = await evmSend({ from: state.evm.address, to: evmContracts().tokenMessenger, data });
+  markBurnSubmitted(txHash);
+  toast("ok", "Burn submitted", usesCircleForwarding() ? "Waiting for forwardTxHash." : "Waiting for attestation.");
+}
+
+async function evmBurnDestination() {
+  if (destIsStellar()) {
+    await loadStellarSdk();
+    const forwarder = contractStrkeyToBytes32Hex(env().stellar.cctpForwarder);
+    return {
+      mintRecipient: forwarder,
+      destinationCaller: forwarder,
+      hookData: buildStellarForwarderHookData(clean(el.recipientInput.value)),
+    };
+  }
+  return {
+    mintRecipient: evmAddressToBytes32Hex(clean(el.recipientInput.value)),
+    destinationCaller: ZERO_BYTES32_HEX,
+    hookData: usesCircleForwarding() ? CIRCLE_FORWARD_HOOK : "0x",
+  };
+}
+
+async function approveStellar() {
+  const StellarSdk = await loadStellarSdk();
+  const server = getSorobanServer();
+  const latest = await server.getLatestLedger();
+  const args = [
+    new StellarSdk.Address(state.stellar.address).toScVal(),
+    new StellarSdk.Address(env().stellar.tokenMessengerMinter).toScVal(),
+    StellarSdk.nativeToScVal(burnSourceUnits(), { type: "i128" }),
+    StellarSdk.nativeToScVal(latest.sequence + 100000, { type: "u32" }),
+  ];
+  const xdr = await buildContractXdr(env().stellar.usdcContract, "approve", args);
+  const signedXdr = await signStellarXdr(xdr);
+  const txHash = await submitStellarXdr(signedXdr);
+  state.flow.approveTxHash = txHash;
+  state.flow.stellarApproved = true;
+  toast("ok", "Stellar approval confirmed", short(txHash));
+}
+
+async function burnStellar() {
+  const StellarSdk = await loadStellarSdk();
+  const destination = stellarBurnDestination();
+  const args = [
+    new StellarSdk.Address(state.stellar.address).toScVal(),
+    StellarSdk.nativeToScVal(burnSourceUnits(), { type: "i128" }),
+    StellarSdk.nativeToScVal(destChain().domain, { type: "u32" }),
+    StellarSdk.xdr.ScVal.scvBytes(destination.mintRecipient),
+    new StellarSdk.Address(env().stellar.usdcContract).toScVal(),
+    StellarSdk.xdr.ScVal.scvBytes(destination.destinationCaller),
+    StellarSdk.nativeToScVal(feeSourceUnits(state.quote.maxFee6), { type: "i128" }),
+    StellarSdk.nativeToScVal(minFinality(), { type: "u32" }),
+  ];
+  const method = destination.hookData ? "deposit_for_burn_with_hook" : "deposit_for_burn";
+  if (destination.hookData) args.push(StellarSdk.xdr.ScVal.scvBytes(hexToBytesLocal(destination.hookData)));
+  const xdr = await buildContractXdr(env().stellar.tokenMessengerMinter, method, args, "2000000");
+  const signedXdr = await signStellarXdr(xdr);
+  const txHash = await submitStellarXdr(signedXdr);
+  markBurnSubmitted(txHash);
+  toast("ok", "Stellar burn confirmed", "Waiting for Circle.");
+}
+
+function stellarBurnDestination() {
+  if (destIsEvm()) {
+    return {
+      mintRecipient: bytes32FromHexAddress(clean(el.recipientInput.value)),
+      destinationCaller: ZERO_BYTES32,
+      hookData: usesCircleForwarding() ? CIRCLE_FORWARD_HOOK : "",
+    };
+  }
+  throw new Error("Stellar destination from Stellar source is not a CCTP route.");
+}
+
+async function receiveOnEvm() {
+  const { encodeFunctionData, parseAbi } = await loadViem();
+  if (!state.flow.messageHex || !state.flow.attestationHex) throw new Error("No message and attestation available.");
+  await switchEvm(destChain());
+  const data = encodeFunctionData({
+    abi: parseAbi(["function receiveMessage(bytes message, bytes attestation) returns (bool)"]),
+    functionName: "receiveMessage",
+    args: [state.flow.messageHex, state.flow.attestationHex],
+  });
+  const txHash = await evmSend({ from: state.evm.address, to: evmContracts().messageTransmitter, data });
+  state.flow.receiveTxHash = txHash;
+  state.flow.manualReceived = true;
+  toast("ok", "Manual receive submitted", short(txHash));
+}
+
+async function receiveOnStellar() {
+  const StellarSdk = await loadStellarSdk();
+  if (!state.flow.messageHex || !state.flow.attestationHex) throw new Error("No message and attestation available.");
+  const args = [
+    StellarSdk.xdr.ScVal.scvBytes(hexToBytesLocal(state.flow.messageHex)),
+    StellarSdk.xdr.ScVal.scvBytes(hexToBytesLocal(state.flow.attestationHex)),
+  ];
+  const xdr = await buildContractXdr(env().stellar.cctpForwarder, "mint_and_forward", args, "3000000");
+  const signedXdr = await signStellarXdr(xdr);
+  const txHash = await submitStellarXdr(signedXdr);
+  state.flow.receiveTxHash = txHash;
+  state.flow.manualReceived = true;
+  toast("ok", "Received on Stellar", short(txHash));
+}
+
+function markBurnSubmitted(txHash) {
+  state.flow.burnTxHash = txHash;
+  state.flow.burnSubmitted = true;
+  el.burnHashInput.value = txHash;
+  startPolling();
+}
+
+async function fetchMessage({ silent = false } = {}) {
+  const txHash = clean(el.burnHashInput.value || state.flow.burnTxHash);
+  if (!txHash) throw new Error("Enter a burn transaction hash.");
+  const url = `${env().irisApiUrl}/v2/messages/${sourceChain().domain}?transactionHash=${encodeURIComponent(txHash)}`;
+  const response = await fetch(url);
+  const json = await response.json();
+  log("Iris response", json);
+  if (!response.ok) throw new Error(json?.message || `Iris messages API ${response.status}`);
+  const item = json?.messages?.[0] ?? json?.message ?? json?.[0];
+  if (!item) {
+    state.flow.statusText = "Circle has not indexed this burn yet.";
+    if (!silent) toast("info", "Not indexed yet", state.flow.statusText);
+    updateUi();
+    return false;
+  }
+  const forwardTxHash =
+    item.forwardTxHash ??
+    item.forward_tx_hash ??
+    item.forwardingTxHash ??
+    item.destinationTxHash ??
+    item.destination_tx_hash ??
+    "";
+  state.flow.nonce = String(item.eventNonce ?? item.nonce ?? item.decodedMessage?.nonce ?? "");
+  el.nonceInput.value = state.flow.nonce;
+  if (forwardTxHash) {
+    state.flow.forwardTxHash = forwardTxHash;
+    state.flow.autoDelivered = true;
+    state.flow.statusText = "Circle forward transaction detected.";
+    toast("ok", "Auto-delivered", short(forwardTxHash));
+    updateUi();
+    stopPolling();
+    return true;
+  }
+  const message = item.message && item.message !== "0x" ? item.message : item.messageBytes;
+  const attestation = item.attestation;
+  if (message && attestation && attestation !== "PENDING") {
+    state.flow.messageHex = normalizeHex(message);
+    state.flow.attestationHex = normalizeHex(attestation);
+    state.flow.statusText = usesCircleForwarding()
+      ? "Attestation ready. No forwardTxHash yet, so manual receive fallback is available."
+      : "Attestation ready.";
+    el.messageText.value = state.flow.messageHex;
+    el.attestationText.value = state.flow.attestationHex;
+    if (!silent) toast("ok", "Attestation ready", "Manual receive is available.");
+    updateUi();
+    return true;
+  }
+  state.flow.statusText =
+    item.delayReason ? `Delay: ${item.delayReason}` : item.status ? `Circle status: ${item.status}` : "Waiting for Circle...";
+  if (!silent) toast("info", "Not ready", state.flow.statusText);
+  updateUi();
+  return false;
+}
+
+function startPolling() {
+  stopPolling();
+  state.pollCount = 0;
+  pollMessage();
+}
+
+function stopPolling() {
+  if (state.pollTimer) {
+    clearTimeout(state.pollTimer);
+    state.pollTimer = null;
+  }
+}
+
+async function pollMessage() {
+  if (state.flow.autoDelivered || state.flow.manualReceived) return stopPolling();
+  if (state.pollCount >= 360) {
+    state.flow.statusText = "Polling paused. Resume from Advanced when ready.";
+    updateUi();
+    return stopPolling();
+  }
+  state.pollCount += 1;
+  try {
+    await fetchMessage({ silent: true });
+  } catch (error) {
+    state.flow.statusText = errorMessage(error);
+    log("Polling error", state.flow.statusText);
+    updateUi();
+  }
+  if (!state.flow.autoDelivered && !state.flow.manualReceived) {
+    state.pollTimer = setTimeout(pollMessage, 10000);
+  }
+}
+
+async function verifyAttestation() {
+  const { bytesToHex, hexToBytes, keccak256, recoverAddress } = await loadViem();
+  const message = state.flow.messageHex || normalizeHex(el.messageText.value);
+  const attestation = state.flow.attestationHex || normalizeHex(el.attestationText.value);
+  if (!message || !attestation) throw new Error("Message and attestation are required.");
+  const response = await fetch(`${env().irisApiUrl}/v2/publicKeys`);
+  const json = await response.json();
+  log("Public keys response", json);
+  if (!response.ok) throw new Error(json?.message || `Public keys API ${response.status}`);
+  const keys = (json.publicKeys ?? [])
+    .filter((key) => Number(key.cctpVersion) === 2)
+    .map((key) => key.publicKey)
+    .filter(Boolean);
+  if (!keys.length) throw new Error("No CCTP V2 public keys returned.");
+  const hash = keccak256(message);
+  const bytes = hexToBytes(attestation);
+  if (bytes.length % 65 !== 0) throw new Error(`Invalid attestation length: ${bytes.length}`);
+  let valid = 0;
+  for (let offset = 0; offset < bytes.length; offset += 65) {
+    const sig = bytesToHex(bytes.slice(offset, offset + 65));
+    const recovered = (await recoverAddress({ hash, signature: sig })).toLowerCase();
+    if (keys.some((key) => publicKeyToAddress(key, keccak256, hexToBytes).toLowerCase() === recovered)) valid += 1;
+  }
+  const threshold = Math.ceil(keys.length / 2);
+  state.flow.verified = valid >= threshold ? "valid" : "invalid";
+  toast(state.flow.verified === "valid" ? "ok" : "err", "Attestation verification", `${valid} valid signature(s), threshold ${threshold}.`);
+}
+
+async function reattest() {
+  const nonce = clean(el.nonceInput.value || state.flow.nonce);
+  if (!nonce) throw new Error("Enter a nonce to re-attest.");
+  const response = await fetch(`${env().irisApiUrl}/v2/reattest/${encodeURIComponent(nonce)}`, { method: "POST" });
+  const json = await response.json();
+  log("Re-attest response", json);
+  if (!response.ok) throw new Error(json?.message || `Re-attest API ${response.status}`);
+  toast("ok", "Re-attestation requested", json.message || `Nonce ${nonce}`);
+  startPolling();
+}
+
+function usePastedAttestation() {
+  const message = normalizeHex(el.messageText.value);
+  const attestation = normalizeHex(el.attestationText.value);
+  if (!message || !attestation) {
+    toast("err", "Missing data", "Paste both message and attestation.");
+    return;
+  }
+  state.flow.messageHex = message;
+  state.flow.attestationHex = attestation;
+  state.flow.statusText = "Using pasted message and attestation.";
+  toast("ok", "Attestation loaded", "Manual receive is available.");
+  updateUi();
+}
+
+async function runMain() {
+  const action = currentAction();
+  if (!action.fn) return;
+  state.busy = true;
+  updateUi();
+  try {
+    await action.fn();
+  } catch (error) {
+    closeModals();
+    const message = errorMessage(error);
+    state.flow.statusText = message;
+    toast("err", "Action failed", message, 8000);
+    log("Action failed", message);
+  } finally {
+    state.busy = false;
+    updateUi();
+  }
+}
+
+async function runAdvanced(fn) {
+  state.busy = true;
+  updateUi();
+  try {
+    await fn();
+  } catch (error) {
+    toast("err", "Advanced action failed", errorMessage(error), 8000);
+  } finally {
+    state.busy = false;
+    updateUi();
+  }
+}
+
+async function runWalletAction(fn) {
+  state.busy = true;
+  updateUi();
+  try {
+    await fn();
+  } catch (error) {
+    const message = errorMessage(error);
+    toast("err", "Wallet connection failed", message, 10000);
+    log("Wallet connection failed", message);
+  } finally {
+    state.busy = false;
+    updateUi();
+  }
+}
+
+function openConnect(target) {
+  state.connectTarget = target;
+  state.connectKind = target === "source" ? sourceChain().kind : destChain().kind;
+  el.connectTitle.textContent = state.connectKind === "stellar" ? "Connect Stellar wallet" : "Connect EVM wallet";
+  el.connectSubtitle.textContent = "WalletConnect is recommended for local testing.";
+  el.qrArea.classList.remove("open");
+  el.manualArea.classList.remove("open");
+  renderConnectOptions();
+  showModal("connectModal");
+}
+
+function renderConnectOptions() {
+  const kind = state.connectKind;
+  const options = [];
+  if (kind === "stellar") {
+    options.push(["WalletConnect", "Freighter or another Soroban-capable wallet.", connectStellarWalletConnect, true]);
+    options.push(["Freighter extension", "Desktop extension when injection is available.", connectFreighter, false]);
+    options.push(["Manual address", "Autofill only. Cannot sign transactions.", () => showManualAddress("Stellar address", "G... / M... / C..."), false]);
+  } else {
+    options.push(["WalletConnect", "MetaMask and compatible mobile wallets.", connectEvmWalletConnect, true]);
+    options.push(["Browser extension", "Desktop extension when injection is available.", connectEvmInjected, false]);
+    options.push(["Manual address", "Autofill only. Cannot sign transactions.", () => showManualAddress("EVM address", "0x..."), false]);
+  }
+  el.connectOptions.innerHTML = "";
+  for (const [title, subtitle, fn, recommended] of options) {
+    const button = document.createElement("button");
+    button.className = `connect-option${recommended ? " recommended" : ""}`;
+    button.type = "button";
+    button.innerHTML = `<strong>${esc(title)}${recommended ? '<em>Recommended</em>' : ""}</strong><span>${esc(subtitle)}</span>`;
+    button.onclick = () => runWalletAction(fn);
+    el.connectOptions.appendChild(button);
+  }
+}
+
+function showManualAddress(label, placeholder) {
+  el.manualLabel.textContent = label;
+  el.manualAddressInput.placeholder = placeholder;
+  el.manualAddressInput.value = "";
+  el.manualArea.classList.add("open");
+}
+
+function useManualAddress() {
+  const address = clean(el.manualAddressInput.value);
+  if (state.connectKind === "stellar") {
+    if (!isStellarAddress(address)) return toast("err", "Invalid Stellar address", "Enter a valid G, M, or C address.");
+    state.stellar.address = address;
+    state.stellar.mode = "manual";
+    detectVaultOrMultisig(address);
+  } else {
+    if (!isEvmAddress(address)) return toast("err", "Invalid EVM address", "Enter a valid 0x address.");
+    state.evm.address = address;
+    state.evm.mode = "manual";
+  }
+  autoFillRecipient();
+  closeModals();
+  updateUi();
+}
+
+async function connectFreighter() {
+  const StellarSdk = await loadStellarSdk();
+  const module = await import("https://esm.sh/@stellar/freighter-api@5.0.0");
+  const api = module.default ?? module;
+  let address = "";
+  if (api.requestAccess) {
+    const result = await api.requestAccess();
+    address = result?.address ?? result ?? "";
+  }
+  if (!address && api.getAddress) {
+    const result = await api.getAddress();
+    address = result?.address ?? "";
+  }
+  if (!address && api.getPublicKey) address = await api.getPublicKey();
+  if (!StellarSdk.StrKey.isValidEd25519PublicKey(address)) throw new Error("Could not get a Freighter public key.");
+  state.stellar.address = address;
+  state.stellar.mode = "freighter";
+  await detectVaultOrMultisig(address);
+  autoFillRecipient();
+  closeModals();
+  toast("ok", "Stellar connected", short(address));
+}
+
+async function connectEvmInjected() {
+  const provider = await waitForInjectedProvider();
+  if (!provider) {
+    throw new Error("No browser extension wallet was detected. Open this page in Chrome with MetaMask, Rabby, or Coinbase Wallet installed and unlocked, allow the extension on localhost, then hard refresh. WalletConnect is the fallback.");
+  }
+  const accounts = await provider.request({ method: "eth_requestAccounts" });
+  if (!accounts?.[0]) throw new Error("No EVM account returned.");
+  state.evm.provider = provider;
+  state.evm.address = accounts[0];
+  state.evm.mode = "injected";
+  state.evm.chainId = Number.parseInt(await provider.request({ method: "eth_chainId" }), 16);
+  autoFillRecipient();
+  closeModals();
+  toast("ok", "EVM connected", short(state.evm.address));
+}
+
+async function connectStellarWalletConnect() {
+  const StellarSdk = await loadStellarSdk();
+  const client = await ensureStellarWc();
+  const chain = state.env === "mainnet" ? "stellar:pubnet" : "stellar:testnet";
+  const { uri, approval } = await client.connect({
+    optionalNamespaces: {
+      stellar: {
+        chains: [chain],
+        methods: ["stellar_signXDR", "stellar_signAndSubmitXDR"],
+        events: [],
+      },
+    },
+  });
+  state.stellar.wcUri = uri || "";
+  state.wcUri = uri || "";
+  await showWalletConnect(uri, () => openStellarWallet(uri));
+  state.stellar.session = await approval();
+  const accounts = state.stellar.session.namespaces?.stellar?.accounts ?? [];
+  const first = accounts.find((account) => account.startsWith(chain)) ?? accounts[0] ?? "";
+  const address = first.split(":")[2] ?? "";
+  if (!StellarSdk.StrKey.isValidEd25519PublicKey(address)) throw new Error("Invalid Stellar WalletConnect account.");
+  state.stellar.address = address;
+  state.stellar.mode = "wc";
+  await detectVaultOrMultisig(address);
+  autoFillRecipient();
+  closeModals();
+  toast("ok", "Stellar connected", short(address));
+}
+
+async function connectEvmWalletConnect() {
+  const client = await ensureEvmWc();
+  const chain = sourceIsEvm() ? sourceChain() : destIsEvm() ? destChain() : env().evm[0];
+  const caip = `eip155:${chain.chainId}`;
+  const { uri, approval } = await client.connect({
+    optionalNamespaces: {
+      eip155: {
+        chains: [caip],
+        methods: [
+          "eth_sendTransaction",
+          "personal_sign",
+          "eth_signTypedData",
+          "wallet_switchEthereumChain",
+          "wallet_addEthereumChain",
+        ],
+        events: ["accountsChanged", "chainChanged"],
+      },
+    },
+  });
+  state.evm.wcUri = uri || "";
+  state.wcUri = uri || "";
+  await showWalletConnect(uri, () => openEvmWallet(uri));
+  state.evm.session = await approval();
+  const accounts = state.evm.session.namespaces?.eip155?.accounts ?? [];
+  const first = accounts.find((account) => account.startsWith(caip)) ?? accounts[0] ?? "";
+  state.evm.address = first.split(":")[2] ?? "";
+  state.evm.mode = "wc";
+  state.evm.chainId = chain.chainId;
+  autoFillRecipient();
+  closeModals();
+  toast("ok", "EVM connected", short(state.evm.address));
+}
+
+async function ensureStellarWc() {
+  if (state.stellar.wc) return state.stellar.wc;
+  const SignClient = await loadSignClient();
+  state.stellar.wc = await SignClient.init({
+    projectId: WALLETCONNECT_PROJECT_ID,
+    relayUrl: "wss://relay.walletconnect.com",
+    metadata: walletConnectMetadata(),
+  });
+  return state.stellar.wc;
+}
+
+async function ensureEvmWc() {
+  if (state.evm.wc) return state.evm.wc;
+  const SignClient = await loadSignClient();
+  state.evm.wc = await SignClient.init({
+    projectId: WALLETCONNECT_PROJECT_ID,
+    relayUrl: "wss://relay.walletconnect.com",
+    metadata: walletConnectMetadata(),
+  });
+  return state.evm.wc;
+}
+
+function walletConnectMetadata() {
+  return {
+    name: "Stellar CCTP Bridge",
+    description: "USDC bridge using Circle CCTP V2",
+    url: location.origin,
+    icons: ["https://walletconnect.com/walletconnect-logo.png"],
+  };
+}
+
+async function showWalletConnect(uri, openFn) {
+  if (!uri) return;
+  el.qrArea.classList.add("open");
+  el.openMobileWalletBtn.onclick = openFn;
+  el.copyWcBtn.onclick = async () => {
+    await navigator.clipboard.writeText(uri);
+    toast("ok", "Copied", "WalletConnect link copied.");
+  };
+  await renderQr(uri);
+}
+
+async function renderQr(uri) {
+  el.qrFallback.style.display = "none";
+  el.qrCanvas.style.display = "block";
+  for (const src of ["https://esm.sh/qrcode@1.5.4?bundle", "https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm"]) {
+    try {
+      const module = await import(src);
+      const QR = module.default ?? module;
+      await QR.toCanvas(el.qrCanvas, uri, { width: 256, margin: 1 });
+      return;
+    } catch (error) {
+      log("QR import failed", src, errorMessage(error));
+    }
+  }
+  el.qrCanvas.style.display = "none";
+  el.qrFallback.style.display = "block";
+  el.qrFallback.textContent = uri;
+}
+
+function openStellarWallet(uri) {
+  if (isMobile()) {
+    location.href = `lobstr://wc?uri=${encodeURIComponent(uri)}`;
+    setTimeout(() => {
+      if (!document.hidden) location.href = `freighter://wc?uri=${encodeURIComponent(uri)}`;
+    }, 1100);
+  } else {
+    el.qrStatus.textContent = "Scan the QR with LOBSTR or Freighter mobile.";
+  }
+}
+
+function openEvmWallet(uri) {
+  if (isMobile()) {
+    location.href = `https://metamask.app.link/wc?uri=${encodeURIComponent(uri)}`;
+  } else {
+    el.qrStatus.textContent = "Scan the QR with MetaMask or another WalletConnect wallet.";
+  }
+}
+
+function autoFillRecipient() {
+  if (state.connectTarget !== "dest") return;
+  if (destIsStellar() && state.stellar.address) el.recipientInput.value = state.stellar.address;
+  if (destIsEvm() && state.evm.address) el.recipientInput.value = state.evm.address;
+}
+
+async function detectVaultOrMultisig(address) {
+  try {
+    const StellarSdk = await loadStellarSdk();
+    if (!StellarSdk.StrKey.isValidEd25519PublicKey(address)) {
+      state.stellar.needsVault = false;
+      return;
+    }
+    const response = await fetch(`${env().stellar.horizonUrl}/accounts/${address}`);
+    if (!response.ok) throw new Error("Could not load Stellar account.");
+    const json = await response.json();
+    const signers = json.signers ?? [];
+    const thresholds = json.thresholds ?? {};
+    const master = signers.find((signer) => signer.key === address);
+    const masterWeight = Number(master?.weight ?? 0);
+    const required = Math.max(Number(thresholds.med_threshold ?? 0), Number(thresholds.high_threshold ?? 0));
+    state.stellar.needsVault = signers.some((signer) => signer.key === VAULT_SIGNER_KEY) || masterWeight < required;
+  } catch {
+    state.stellar.needsVault = false;
+  }
+}
+
+async function signStellarXdr(xdr) {
+  if (state.stellar.mode === "manual") throw new Error("Manual Stellar address cannot sign.");
+  if (state.stellar.mode === "freighter") {
+    const module = await import("https://esm.sh/@stellar/freighter-api@5.0.0");
+    const api = module.default ?? module;
+    showSigning("Action required in Freighter", "Approve the Stellar transaction in Freighter.", null, null);
+    try {
+      const result = await api.signTransaction(xdr, {
+        networkPassphrase: env().stellar.networkPassphrase,
+        accountToSign: state.stellar.address,
+      });
+      closeModals();
+      return extractSignedXdr(result);
+    } catch (error) {
+      closeModals();
+      throw normalizeStellarWalletError(error);
+    }
+  }
+  if (state.stellar.mode === "wc") {
+    const chain = state.env === "mainnet" ? "stellar:pubnet" : "stellar:testnet";
+    showSigning("Action required in mobile wallet", "Approve the Stellar WalletConnect request.", () => openStellarWallet(state.stellar.wcUri), state.stellar.wcUri);
+    setTimeout(() => openStellarWallet(state.stellar.wcUri), 400);
+    try {
+      const result = await state.stellar.wc.request({
+        topic: state.stellar.session.topic,
+        chainId: chain,
+        request: { jsonrpc: "2.0", method: "stellar_signXDR", params: { xdr } },
+      });
+      closeModals();
+      return extractSignedXdr(result);
+    } catch (error) {
+      closeModals();
+      throw normalizeStellarWalletError(error);
+    }
+  }
+  throw new Error("Connect a Stellar signing wallet.");
+}
+
+async function submitStellarXdr(xdr) {
+  const StellarSdk = await loadStellarSdk();
+  const server = getSorobanServer();
+  const signedXdr = extractSignedXdr(xdr);
+  let tx;
+  try {
+    tx = StellarSdk.TransactionBuilder.fromXDR(signedXdr, env().stellar.networkPassphrase);
+  } catch (error) {
+    throw normalizeStellarWalletError(error);
+  }
+  const sent = await server.sendTransaction(tx);
+  if (sent.status !== "PENDING" && sent.status !== "SUCCESS") throw new Error(`Stellar sendTransaction: ${sent.status}`);
+  let result = await server.getTransaction(sent.hash);
+  for (let i = 0; i < 80 && result.status === "NOT_FOUND"; i += 1) {
+    await sleep(1000);
+    result = await server.getTransaction(sent.hash);
+  }
+  if (result.status !== "SUCCESS") throw new Error(`Stellar transaction status: ${result.status}`);
+  return sent.hash;
+}
+
+function getSorobanServer() {
+  if (!StellarSdk) throw new Error("Stellar SDK is not loaded yet.");
+  const rpc = StellarSdk.rpc ?? StellarSdk.SorobanRpc;
+  return new rpc.Server(env().stellar.sorobanRpcUrl);
+}
+
+async function buildContractXdr(contractId, method, args, fee = "1000000") {
+  const StellarSdk = await loadStellarSdk();
+  const server = getSorobanServer();
+  const account = await server.getAccount(state.stellar.address);
+  const contract = new StellarSdk.Contract(contractId);
+  const tx = new StellarSdk.TransactionBuilder(account, {
+    fee,
+    networkPassphrase: env().stellar.networkPassphrase,
+  })
+    .addOperation(contract.call(method, ...args))
+    .setTimeout(TIMEOUT_SECONDS)
+    .build();
+  return (await prepareSoroban(tx)).toXDR();
+}
+
+async function prepareSoroban(tx) {
+  const StellarSdk = await loadStellarSdk();
+  const server = getSorobanServer();
+  if (server.prepareTransaction) return server.prepareTransaction(tx);
+  const rpc = StellarSdk.rpc ?? StellarSdk.SorobanRpc;
+  const sim = await server.simulateTransaction(tx);
+  return rpc.assembleTransaction(tx, sim).build();
+}
+
+async function switchEvm(chain) {
+  if (state.evm.mode === "wc") {
+    state.evm.chainId = chain.chainId;
+    return;
+  }
+  const provider = state.evm.provider ?? getInjectedProvider();
+  if (!provider) throw new Error("No EVM provider connected.");
+  state.evm.provider = provider;
+  const hexChainId = `0x${Number(chain.chainId).toString(16)}`;
+  try {
+    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: hexChainId }] });
+  } catch {
+    await provider.request({
+      method: "wallet_addEthereumChain",
+      params: [
+        {
+          chainId: hexChainId,
+          chainName: chain.label,
+          nativeCurrency: { name: chain.symbol, symbol: chain.symbol, decimals: 18 },
+          rpcUrls: [chain.rpcUrl],
+          blockExplorerUrls: [chain.explorerTx.replace(/\/tx\/?$/, "")],
+        },
+      ],
+    });
+  }
+  state.evm.chainId = chain.chainId;
+}
+
+async function evmSend(tx) {
+  if (state.evm.mode === "manual") throw new Error("Manual EVM address cannot sign.");
+  if (state.evm.mode === "wc") {
+    showSigning("Action required in EVM wallet", "Approve the WalletConnect transaction.", () => openEvmWallet(state.evm.wcUri), state.evm.wcUri);
+    setTimeout(() => openEvmWallet(state.evm.wcUri), 500);
+    try {
+      const result = await state.evm.wc.request({
+        topic: state.evm.session.topic,
+        chainId: `eip155:${state.evm.chainId}`,
+        request: { method: "eth_sendTransaction", params: [tx] },
+      });
+      closeModals();
+      return result;
+    } catch (error) {
+      el.signingStatus.textContent = errorMessage(error);
+      throw error;
+    }
+  }
+  const provider = state.evm.provider ?? getInjectedProvider();
+  if (!provider) throw new Error("No EVM provider connected.");
+  showSigning("Action required in EVM wallet", "Approve the browser wallet transaction.", null, null);
+  try {
+    const result = await provider.request({ method: "eth_sendTransaction", params: [tx] });
+    closeModals();
+    return result;
+  } catch (error) {
+    el.signingStatus.textContent = errorMessage(error);
+    throw error;
+  }
+}
+
+function getInjectedProvider() {
+  if (window.ethereum?.providers?.length) return preferredEvmProvider(window.ethereum.providers);
+  return window.ethereum ?? preferredAnnouncedEvmProvider()?.provider ?? null;
+}
+
+async function waitForInjectedProvider(timeoutMs = 900) {
+  const immediate = getInjectedProvider();
+  if (immediate) return immediate;
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      const provider = getInjectedProvider();
+      if (!provider) return;
+      settled = true;
+      window.removeEventListener("eip6963:announceProvider", onAnnounce);
+      resolve(provider);
+    };
+    const onAnnounce = (event) => {
+      rememberAnnouncedEvmProvider(event);
+      finish();
+    };
+    window.addEventListener("eip6963:announceProvider", onAnnounce);
+    window.dispatchEvent(new Event("eip6963:requestProvider"));
+    setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("eip6963:announceProvider", onAnnounce);
+      resolve(getInjectedProvider());
+    }, timeoutMs);
+  });
+}
+
+function rememberAnnouncedEvmProvider(event) {
+  const detail = event?.detail;
+  if (!detail?.provider) return;
+  const id = detail.info?.uuid ?? detail.info?.rdns ?? detail.info?.name ?? String(announcedEvmProviders.length);
+  const existing = announcedEvmProviders.findIndex((item) => item.id === id || item.provider === detail.provider);
+  const entry = { id, info: detail.info ?? {}, provider: detail.provider };
+  if (existing >= 0) announcedEvmProviders[existing] = entry;
+  else announcedEvmProviders.push(entry);
+}
+
+function preferredAnnouncedEvmProvider() {
+  if (!announcedEvmProviders.length) return null;
+  return announcedEvmProviders.find((item) => providerLooksLike(item.provider, item.info, "metamask"))
+    ?? announcedEvmProviders.find((item) => providerLooksLike(item.provider, item.info, "rabby"))
+    ?? announcedEvmProviders.find((item) => providerLooksLike(item.provider, item.info, "coinbase"))
+    ?? announcedEvmProviders[0];
+}
+
+function preferredEvmProvider(providers) {
+  return providers.find((provider) => providerLooksLike(provider, null, "metamask"))
+    ?? providers.find((provider) => providerLooksLike(provider, null, "rabby"))
+    ?? providers.find((provider) => providerLooksLike(provider, null, "coinbase"))
+    ?? providers[0]
+    ?? null;
+}
+
+function providerLooksLike(provider, info, name) {
+  const haystack = [
+    info?.name,
+    info?.rdns,
+    provider?.isMetaMask ? "metamask" : "",
+    provider?.isRabby ? "rabby" : "",
+    provider?.isCoinbaseWallet ? "coinbase" : "",
+  ].join(" ").toLowerCase();
+  return haystack.includes(name);
+}
+
+function showSigning(title, text, openFn, wcLink) {
+  el.signingTitle.textContent = title;
+  el.signingText.textContent = text;
+  el.signingStatus.textContent = "Waiting for signature...";
+  el.signingSubtext.textContent = "Do not refresh the page while the wallet request is open.";
+  el.openSigningWalletBtn.classList.toggle("hidden", !openFn);
+  el.copySigningLinkBtn.classList.toggle("hidden", !wcLink);
+  el.openSigningWalletBtn.onclick = openFn || (() => {});
+  el.copySigningLinkBtn.onclick = async () => {
+    if (wcLink) await navigator.clipboard.writeText(wcLink);
+    toast("ok", "Copied", "WalletConnect link copied.");
+  };
+  showModal("signingModal");
+}
+
+function showModal(id) {
+  el.backdrop.classList.add("open");
+  el[id].classList.add("open");
+}
+
+function closeModals() {
+  el.backdrop.classList.remove("open");
+  document.querySelectorAll(".modal.open").forEach((modal) => modal.classList.remove("open"));
+}
+
+function setEnv(nextEnv) {
+  state.env = nextEnv;
+  state.mainnetArmed = false;
+  const sourceWasStellar = sourceIsStellar();
+  const destWasStellar = destIsStellar();
+  state.sourceId = sourceWasStellar ? NETWORKS[nextEnv].stellar.id : NETWORKS[nextEnv].evm[0].id;
+  state.destId = destWasStellar ? NETWORKS[nextEnv].stellar.id : NETWORKS[nextEnv].evm[0].id;
+  if (state.sourceId === state.destId) {
+    state.destId = [NETWORKS[nextEnv].stellar, ...NETWORKS[nextEnv].evm]
+      .find((chain) => chain.id !== state.sourceId)?.id ?? state.destId;
+  }
+  state.quote = blankQuote();
+  state.allowance = { status: "idle", allowance6: null, lastUpdated: "" };
+  resetFlow(false);
+  populateChains();
+  updateUi();
+}
+
+function setSpeed(speed) {
+  state.speed = speed;
+  state.quote = blankQuote();
+  updateUi();
+}
+
+function resetFlow(clearInputs = true) {
+  stopPolling();
+  state.flow = blankFlow();
+  state.quote = blankQuote();
+  state.allowance = { status: "idle", allowance6: null, lastUpdated: "" };
+  if (clearInputs) {
+    el.amountInput.value = "";
+    el.recipientInput.value = "";
+    el.burnHashInput.value = "";
+    el.nonceInput.value = "";
+    el.messageText.value = "";
+    el.attestationText.value = "";
+  }
+  updateUi();
+}
+
+function copySummary() {
+  const lines = [
+    `Transfer: ${state.flow.transferId}`,
+    `Network: ${state.env}`,
+    `Route: ${sourceChain().label} -> ${destChain().label}`,
+    `Speed: ${state.speed}`,
+    `Delivery: ${deliveryLabel()}`,
+    `Burn amount: ${fmt(burnSourceUnits(), sourceDecimals())}`,
+    `Estimated receive: ${fmt(receiveDestUnits(), destDecimals())}`,
+    `maxFee: ${fmt(feeSourceUnits(state.quote.maxFee6), sourceDecimals())}`,
+    `Recipient: ${clean(el.recipientInput.value) || "-"}`,
+    `Approve tx: ${state.flow.approveTxHash || "-"}`,
+    `Burn tx: ${state.flow.burnTxHash || "-"}`,
+    `Forward tx: ${state.flow.forwardTxHash || "-"}`,
+    `Receive tx: ${state.flow.receiveTxHash || "-"}`,
+    `Nonce: ${state.flow.nonce || "-"}`,
+    `Attestation verified: ${state.flow.verified}`,
+  ];
+  navigator.clipboard.writeText(lines.join("\n"));
+  toast("ok", "Copied", "Transfer summary copied.");
+}
+
+function applyBuffer(amount, percent) {
+  if (amount <= 0n) return 0n;
+  const pct = BigInt(Math.max(0, Number(percent) || 0));
+  return (amount * (100n + pct) + 99n) / 100n;
+}
+
+function calculateProtocolFee(amount, bps) {
+  const bpsHundredths = decimalToScaledBigInt(String(bps ?? "0"), 2);
+  return (amount * bpsHundredths + 999999n) / 1000000n;
+}
+
+function decimalToScaledBigInt(value, scale) {
+  const cleaned = String(value).trim();
+  if (!cleaned || !/^\d+(\.\d+)?$/.test(cleaned)) return 0n;
+  const [whole, fraction = ""] = cleaned.split(".");
+  return BigInt(whole) * 10n ** BigInt(scale) + BigInt((fraction + "0".repeat(scale)).slice(0, scale));
+}
+
+function pickForwardFee(forwardFee) {
+  const value =
+    forwardFee.medium ??
+    forwardFee.med ??
+    forwardFee.high ??
+    forwardFee.low ??
+    0;
+  return BigInt(String(value));
+}
+
+function parseUnits(value, decimals) {
+  const cleaned = String(value ?? "").trim().replace(/,/g, "");
+  if (!cleaned || !/^\d+(\.\d+)?$/.test(cleaned)) return 0n;
+  const [whole, fraction = ""] = cleaned.split(".");
+  const scale = Number(decimals);
+  return BigInt(whole) * 10n ** decimals + BigInt((fraction + "0".repeat(scale)).slice(0, scale));
+}
+
+function unitsToAmount(units, decimals) {
+  const sign = units < 0n ? "-" : "";
+  const abs = units < 0n ? -units : units;
+  const base = 10n ** decimals;
+  const whole = abs / base;
+  let fraction = String(abs % base).padStart(Number(decimals), "0");
+  fraction = fraction.replace(/0+$/, "");
+  return `${sign}${whole}${fraction ? `.${fraction}` : ".00"}`;
+}
+
+function fmt(units, decimals) {
+  return `${unitsToAmount(units, decimals)} USDC`;
+}
+
+function clean(value) {
+  return String(value ?? "").trim().replace(/\s+/g, "");
+}
+
+function normalizeHex(value) {
+  const cleaned = clean(value);
+  if (!cleaned) return "";
+  return cleaned.startsWith("0x") ? cleaned : `0x${cleaned}`;
+}
+
+function isEvmAddress(value) {
+  return /^0x[a-fA-F0-9]{40}$/.test(clean(value));
+}
+
+function isStellarAddress(value) {
+  const address = clean(value);
+  if (!address) return false;
+  if (!StellarSdk) return /^[GCM][A-Z2-7]{55,69}$/.test(address);
+  return (
+    StellarSdk.StrKey.isValidEd25519PublicKey(address) ||
+    StellarSdk.StrKey.isValidContract(address) ||
+    (StellarSdk.StrKey.isValidMed25519PublicKey?.(address) ?? false)
+  );
+}
+
+function bytes32FromHexAddress(address) {
+  const cleaned = clean(address).replace(/^0x/, "");
+  const out = new Uint8Array(32);
+  for (let i = 0; i < 20; i += 1) out[12 + i] = Number.parseInt(cleaned.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+function hexToBytesLocal(hex) {
+  const cleaned = normalizeHex(hex).slice(2);
+  if (cleaned.length % 2 !== 0) throw new Error("Invalid hex byte string.");
+  const out = new Uint8Array(cleaned.length / 2);
+  for (let i = 0; i < out.length; i += 1) {
+    out[i] = Number.parseInt(cleaned.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+function evmAddressToBytes32Hex(address) {
+  return `0x${"00".repeat(12)}${clean(address).replace(/^0x/, "").toLowerCase()}`;
+}
+
+function contractStrkeyToBytes32Hex(strkey) {
+  if (!StellarSdk.StrKey.isValidContract(strkey)) throw new Error(`Invalid Stellar contract address: ${strkey}`);
+  return `0x${Array.from(StellarSdk.StrKey.decodeContract(strkey), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function buildStellarForwarderHookData(recipient) {
+  if (!isStellarAddress(recipient)) throw new Error("Invalid Stellar recipient for CctpForwarder hook data.");
+  const recipientBytes = new TextEncoder().encode(clean(recipient));
+  const buffer = new Uint8Array(32 + recipientBytes.length);
+  const view = new DataView(buffer.buffer);
+  view.setUint32(24, 0, false);
+  view.setUint32(28, recipientBytes.length, false);
+  buffer.set(recipientBytes, 32);
+  return `0x${Array.from(buffer, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function publicKeyToAddress(publicKey, keccak256, hexToBytes) {
+  const withoutPrefix = `0x${String(publicKey).replace(/^0x/, "").replace(/^04/, "")}`;
+  const hash = keccak256(hexToBytes(withoutPrefix));
+  return `0x${hash.slice(-40)}`;
+}
+
+function short(value) {
+  const text = String(value ?? "");
+  return text.length > 17 ? `${text.slice(0, 7)}...${text.slice(-5)}` : text;
+}
+
+function txLink(hash, chain) {
+  if (!hash) return "-";
+  const href = chain.kind === "stellar" ? `${env().stellar.explorerTx}${hash}` : `${chain.explorerTx}${hash}`;
+  return `<a href="${esc(href)}" target="_blank" rel="noreferrer">${esc(short(hash))}</a>`;
+}
+
+function makeTransferId() {
+  const bytes = new Uint32Array(1);
+  crypto.getRandomValues(bytes);
+  return `CCTP-${bytes[0].toString(16).toUpperCase().padStart(8, "0")}`;
+}
+
+function isMobile() {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function errorMessage(error) {
+  return error?.shortMessage || error?.message || String(error);
+}
+
+function extractSignedXdr(result) {
+  if (typeof result === "string") return result;
+  const candidates = [
+    result?.signedTxXdr,
+    result?.signedTxXDR,
+    result?.signedXdr,
+    result?.signedXDR,
+    result?.xdr,
+    result?.transactionXdr,
+    result?.transactionXDR,
+    result?.result?.signedTxXdr,
+    result?.result?.signedTxXDR,
+    result?.result?.signedXdr,
+    result?.result?.signedXDR,
+    result?.result?.xdr,
+    result?.result?.transactionXdr,
+    result?.result?.transactionXDR,
+  ];
+  const xdr = candidates.find((candidate) => typeof candidate === "string" && candidate.length > 32);
+  if (xdr) return xdr;
+  throw new Error("The wallet did not return a signed transaction XDR.");
+}
+
+function normalizeStellarWalletError(error) {
+  const message = errorMessage(error);
+  if (/bad union switch/i.test(message)) {
+    return new Error("The connected Stellar wallet could not parse this Soroban transaction XDR. CCTP approval is a Soroban contract call, so use a Soroban-capable Stellar wallet such as Freighter for signing. Some LOBSTR WalletConnect flows only support classic Stellar transaction XDRs.");
+  }
+  return error instanceof Error ? error : new Error(message);
+}
+
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]);
+}
+
+function log(...values) {
+  const text = values
+    .map((value) => (typeof value === "string" ? value : JSON.stringify(value, (_, item) => (typeof item === "bigint" ? item.toString() : item), 2)))
+    .join(" ");
+  el.logBox.textContent += `${text}\n`;
+  el.logBox.scrollTop = el.logBox.scrollHeight;
+}
+
+function toast(type, title, message, timeout = 3600) {
+  const node = document.createElement("div");
+  node.className = `toast ${type}`;
+  const mark = type === "ok" ? "ok" : type === "err" ? "!" : "i";
+  node.innerHTML = `<div class="toast-mark">${esc(mark)}</div><div><div class="toast-title">${esc(title)}</div><div class="toast-message">${esc(message)}</div></div><button type="button" aria-label="Dismiss">x</button>`;
+  node.querySelector("button").onclick = () => node.remove();
+  el.toastWrap.appendChild(node);
+  if (timeout) setTimeout(() => node.remove(), timeout);
+}
+
+function bindEvents() {
+  el.sourceChain.onchange = () => {
+    state.sourceId = el.sourceChain.value;
+    if (state.sourceId === state.destId) state.destId = chains().find((chain) => chain.id !== state.sourceId)?.id ?? state.destId;
+    resetFlow(false);
+  };
+  el.destChain.onchange = () => {
+    state.destId = el.destChain.value;
+    if (state.sourceId === state.destId) state.sourceId = chains().find((chain) => chain.id !== state.destId)?.id ?? state.sourceId;
+    resetFlow(false);
+  };
+  el.swapRouteBtn.onclick = () => {
+    [state.sourceId, state.destId] = [state.destId, state.sourceId];
+    resetFlow(false);
+  };
+  el.amountInput.oninput = () => {
+    state.quote = blankQuote();
+    state.allowance = { status: "idle", allowance6: null, lastUpdated: "" };
+    updateUi();
+  };
+  el.recipientInput.oninput = updateUi;
+  el.feeBufferInput.oninput = () => {
+    state.feeBufferPct = Math.max(0, Number(el.feeBufferInput.value) || 0);
+    if (state.quote.status === "ready") state.quote.maxFee6 = applyBuffer(state.quote.estimatedFee6, state.feeBufferPct);
+    updateUi();
+  };
+  el.forwardingToggle.onchange = () => {
+    state.useCircleForwarding = el.forwardingToggle.checked;
+    state.quote = blankQuote();
+    updateUi();
+  };
+  el.refreshQuoteBtn.onclick = () => runAdvanced(refreshQuote);
+  el.refreshAllowanceBtn.onclick = () => runAdvanced(refreshAllowance);
+  el.fastBtn.onclick = () => {
+    if (!canUseFast()) return toast("info", "Fast unavailable", "This source chain is Standard-only.");
+    setSpeed("fast");
+  };
+  el.standardBtn.onclick = () => setSpeed("standard");
+  el.sourceWalletBtn.onclick = () => openConnect("source");
+  el.destWalletBtn.onclick = () => openConnect("dest");
+  el.useConnectedRecipientBtn.onclick = () => {
+    state.connectTarget = "dest";
+    autoFillRecipient();
+    updateUi();
+  };
+  el.mainActionBtn.onclick = runMain;
+  el.testnetBtn.onclick = () => setEnv("testnet");
+  el.mainnetBtn.onclick = () => setEnv("mainnet");
+  el.armMainnetBtn.onclick = () => {
+    state.mainnetArmed = !state.mainnetArmed;
+    toast("info", state.mainnetArmed ? "Mainnet armed" : "Mainnet locked", state.mainnetArmed ? "Mainnet actions are enabled." : "Mainnet actions are locked.");
+    updateUi();
+  };
+  el.resetBtn.onclick = () => resetFlow(true);
+  el.copySummaryBtn.onclick = copySummary;
+  el.advancedToggle.onclick = () => {
+    el.advancedArea.classList.toggle("open");
+    el.advancedToggle.textContent = el.advancedArea.classList.contains("open") ? "Hide" : "Show";
+  };
+  el.fetchMessageBtn.onclick = () => runAdvanced(() => fetchMessage());
+  el.resumePollingBtn.onclick = startPolling;
+  el.verifyAttestationBtn.onclick = () => runAdvanced(verifyAttestation);
+  el.reattestBtn.onclick = () => runAdvanced(reattest);
+  el.useAttestationBtn.onclick = usePastedAttestation;
+  el.manualReceiveBtn.onclick = () => runAdvanced(destIsStellar() ? receiveOnStellar : receiveOnEvm);
+  el.useManualAddressBtn.onclick = useManualAddress;
+  el.backdrop.onclick = closeModals;
+  document.querySelectorAll("[data-close]").forEach((button) => {
+    button.onclick = closeModals;
+  });
+}
+
+function init() {
+  populateChains();
+  bindEvents();
+  updateUi();
+  log("Loaded Stellar CCTP Bridge", { env: state.env, transferId: state.flow.transferId });
+}
+
+init();

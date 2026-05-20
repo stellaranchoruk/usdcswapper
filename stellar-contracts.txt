@@ -1,0 +1,104 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.circle.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# CCTP Stellar Contracts and Interfaces
+
+> Contracts for CCTP support on the Stellar network
+
+## Overview
+
+Stellar CCTP contracts run on Soroban, Stellar's smart contracts platform. CCTP
+message fields use 32-byte address encodings. CCTP treats `mintRecipient` as a
+contract address. If the recipient is a Stellar user or
+[muxed](https://developers.stellar.org/docs/build/guides/transactions/pooled-accounts-muxed-accounts-memos#muxed-accounts)
+account instead, hook data can carry a `forwardRecipient` `strkey` so the
+forwarder can send funds to that address.
+
+To align with Stellar address encoding while keeping parity with EVM and other
+non-EVM blockchains, CCTP uses three contracts:
+
+* `TokenMessengerMinter`: consolidates the responsibilities of
+  `TokenMessengerV2` (burn + send) and `TokenMinterV2` (receive + mint). On
+  mint, `mintRecipient` is treated as a contract address and hooks supply the
+  `forwardRecipient` when needed.
+* `MessageTransmitter`: provides the messaging layer that emits or receives
+  attested messages and delivers them to `TokenMessengerMinter` (including
+  `receive_message` for forwarder flows).
+* `CctpForwarder`: receives minted USDC and forwards it to `forwardRecipient` in
+  hook data.
+
+## Mainnet contract addresses
+
+| Contract               | [Domain](/cctp/concepts/supported-chains-and-domains#domain-identifiers) | Address                                                                                                                                                                |
+| :--------------------- | :----------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TokenMessengerMinter` | 27                                                                       | [`CAE2G5Z77UP7GYPYGFOWFGW7C7J6I4YP2AFGSADRKQY62SYUFLPNFTXL`](https://stellar.expert/explorer/public/contract/CAE2G5Z77UP7GYPYGFOWFGW7C7J6I4YP2AFGSADRKQY62SYUFLPNFTXL) |
+| `MessageTransmitter`   | 27                                                                       | [`CACMENFFJPJMSDAJQLX4R7K3SFZIW2LJSE3R2UMLGSWHFHS353FVXAZV`](https://stellar.expert/explorer/public/contract/CACMENFFJPJMSDAJQLX4R7K3SFZIW2LJSE3R2UMLGSWHFHS353FVXAZV) |
+| `CctpForwarder`        | 27                                                                       | [`CBZL2IH7F6BIDAA3WBNXYKIXSATJGMSW7K5P5MJ6STX5RXN47TZJDF5T`](https://stellar.expert/explorer/public/contract/CBZL2IH7F6BIDAA3WBNXYKIXSATJGMSW7K5P5MJ6STX5RXN47TZJDF5T) |
+
+## Testnet contract addresses
+
+| Contract               | [Domain](/cctp/concepts/supported-chains-and-domains#domain-identifiers) | Address                                                                                                                                                                 |
+| :--------------------- | :----------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TokenMessengerMinter` | 27                                                                       | [`CDNG7HXAPBWICI2E3AUBP3YZWZELJLYSB6F5CC7WLDTLTHVM74SLRTHP`](https://stellar.expert/explorer/testnet/contract/CDNG7HXAPBWICI2E3AUBP3YZWZELJLYSB6F5CC7WLDTLTHVM74SLRTHP) |
+| `MessageTransmitter`   | 27                                                                       | [`CBJ6MTCKKZG73PMDZCJMSFRD7DQEMI4FKDH7CGDSV4W6FHCRBCQAVVJY`](https://stellar.expert/explorer/testnet/contract/CBJ6MTCKKZG73PMDZCJMSFRD7DQEMI4FKDH7CGDSV4W6FHCRBCQAVVJY) |
+| `CctpForwarder`        | 27                                                                       | [`CA66Q2WFBND6V4UEB7RD4SAXSVIWMD6RA4X3U32ELVFGXV5PJK4T4VSZ`](https://stellar.expert/explorer/testnet/contract/CA66Q2WFBND6V4UEB7RD4SAXSVIWMD6RA4X3U32ELVFGXV5PJK4T4VSZ) |
+
+## CCTP interface
+
+* `TokenMessengerMinter`: initiates crosschain burns and mints tokens upon
+  attested message receipt.
+* `MessageTransmitter`: emits messages, verifies attestations, and routes
+  verified messages to the recipient contract.
+* `CctpForwarder`: completes mint and forward in one transaction when hook data
+  supplies a `forwardRecipient` `strkey`.
+
+### TokenMessengerMinter interface
+
+The `TokenMessengerMinter` contract consolidates the roles of both
+`TokenMessengerV2` and `TokenMinterV2` found on EVM chains. It handles USDC
+burns, message emission, and token minting once crosschain messages are attested
+by Circle's Iris service. On Stellar it assumes `mintRecipient` is a contract.
+Account recipients use `CctpForwarder` and hook-qualified `forwardRecipient`
+bytes.
+
+| Function                             | Description                                                              | Notes                                                   |
+| :----------------------------------- | :----------------------------------------------------------------------- | :------------------------------------------------------ |
+| `deposit_for_burn`                   | Burns USDC and emits a crosschain message for minting on another domain. | Standard CCTP transfer initiation.                      |
+| `deposit_for_burn_with_hook`         | Same as `deposit_for_burn`, but attaches custom metadata (`hook_data`).  | Used for programmable transfers and Stellar forwarding. |
+| `handle_receive_finalized_message`   | Mints USDC upon receiving a fully finalized message.                     | Called by `MessageTransmitter`.                         |
+| `handle_receive_unfinalized_message` | Processes partially finalized ("Fast Burn") messages.                    | Enables faster crosschain transfers.                    |
+| `message_body_version`               | Returns supported message format version.                                | Used for compatibility checks.                          |
+| `local_message_transmitter`          | Returns the linked `MessageTransmitter` address.                         | Must match configured domain transmitter.               |
+
+### MessageTransmitter interface
+
+The `MessageTransmitter` contract provides the core messaging layer for CCTP on
+Stellar. It is responsible for emitting, receiving, and validating crosschain
+messages, enforcing attestation rules, and ensuring message uniqueness.
+
+| Function                    | Description                                                                      | Notes                                                                                                                   |
+| :-------------------------- | :------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------- |
+| `send_message`              | Sends a crosschain message with specified domain, recipient, and message body.   | Core function for outgoing CCTP messages.                                                                               |
+| `receive_message`           | Validates a message and its attestation; delivers message body to the recipient. | Called by an offchain forwarding service (or by `CctpForwarder` in the forwarder flow) with an attestation from Circle. |
+| `get_max_message_body_size` | Returns the maximum allowed message size.                                        | Used by offchain components for validation.                                                                             |
+| `is_nonce_used`             | Checks if a message nonce has been processed already.                            | Prevents message replay.                                                                                                |
+| `get_local_domain`          | Returns this contract's domain ID.                                               | Expected to be 27 for Stellar.                                                                                          |
+| `get_version`               | Returns protocol version supported by this transmitter.                          | Used by Iris attestation service.                                                                                       |
+
+### CctpForwarder interface
+
+The `CctpForwarder` contract calls `receive_message` on `MessageTransmitter`,
+takes the mint, and transfers USDC to `forwardRecipient` parsed from
+`hook_data`. See [Hook format](/cctp/references/stellar#hook-format) for
+details.
+
+| Function                                               | Description                                                                                                                             | Notes                        |
+| :----------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------- |
+| `mint_and_forward(message: Bytes, attestation: Bytes)` | Verifies message and attestation. Runs `receive_message` so USDC mints to `CctpForwarder`. Sends USDC to `forwardRecipient` from hooks. | Atomic, any failure reverts. |
+
+<Note>
+  The `CctpForwarder` flow is non-custodial. `mint_and_forward` mints to this
+  contract and pays `forwardRecipient` in one atomic Soroban invocation. Circle
+  does not take custody of the minted balance in between.
+</Note>

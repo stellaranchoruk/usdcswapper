@@ -1,0 +1,259 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.circle.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Attestation Verification
+
+> Technical reference for verifying CCTP attestation signatures
+
+When you retrieve an attestation from Circle's Attestation Service, you can
+optionally verify the attestation signature before using it to mint USDC on the
+destination blockchain. This page explains how the verification process works
+and when you might want to use it.
+
+## How verification works
+
+The verification process uses cryptographic signature recovery to confirm that
+Circle's Attestation Service signed the message. It involves the following
+steps:
+
+<Steps>
+  <Step title="Retrieve the public key">
+    Fetch Circle's current public key from the
+    [`GET /v2/publicKeys`](/api-reference/cctp/all/get-public-keys-v2) endpoint.
+  </Step>
+
+  <Step title="Hash the message">
+    Create a `keccak256` hash of the message bytes.
+  </Step>
+
+  <Step title="Parse the attestation">
+    Split the 65-byte attestation into its `r`, `s`, and `v` components (ECDSA
+    signature format).
+  </Step>
+
+  <Step title="Recover the signer">
+    Use the signature and message hash to recover the public key that signed the
+    message.
+  </Step>
+
+  <Step title="Compare addresses">
+    Convert both the recovered public key and Circle's public key to Ethereum
+    addresses and compare them.
+  </Step>
+</Steps>
+
+If the addresses match, the attestation was signed by Circle's Attestation
+Service and is valid.
+
+## When to verify attestations
+
+Attestation verification is optional because the CCTP contracts on the
+destination blockchain perform their own verification when you call
+`receiveMessage`. However, you might want to verify attestations before
+submitting the mint transaction if:
+
+* **Your application requires an additional layer of security**: Verifying
+  before minting provides defense-in-depth by catching invalid attestations at
+  the application layer.
+
+* **You want to detect invalid attestations before paying gas fees**: If an
+  attestation is invalid, the mint transaction fails and you lose the gas fees.
+  Pre-verification lets you catch this before submitting the transaction.
+
+* **You're building a relayer service that batches multiple attestations**:
+  Relayers can verify each attestation in a batch before submitting, preventing
+  a single invalid attestation from affecting the entire batch.
+
+## Verification code example
+
+The following examples show how to verify an attestation signature using Viem or
+Ethers:
+
+<CodeGroup>
+  ```ts Viem theme={null}
+  import { keccak256, hexToBytes, recoverAddress, bytesToHex } from "viem";
+
+  interface PublicKey {
+    publicKey: `0x${string}`;
+    cctpVersion: number;
+  }
+
+  interface AttestationData {
+    message: string;
+    attestation: string;
+  }
+
+  function publicKeyToAddress(publicKey: `0x${string}`): `0x${string}` {
+    // Remove '0x04' prefix (uncompressed public key marker)
+    const publicKeyWithoutPrefix = `0x${publicKey.slice(4)}` as `0x${string}`;
+    const hash = keccak256(hexToBytes(publicKeyWithoutPrefix));
+    // Take last 20 bytes (40 hex chars) as address
+    return `0x${hash.slice(-40)}`;
+  }
+
+  async function getPublicKeys() {
+    const response = await fetch(
+      "https://iris-api-sandbox.circle.com/v2/publicKeys",
+    );
+    const data = await response.json();
+    return data.publicKeys
+      .filter((key: PublicKey) => key.cctpVersion === 2)
+      .map((key: PublicKey) => key.publicKey);
+  }
+
+  async function verifyAttestation(
+    attestationData: AttestationData,
+    publicKeys: `0x${string}`[],
+  ) {
+    try {
+      const messageHash = keccak256(attestationData.message as `0x${string}`);
+      const attestationBytes = hexToBytes(
+        attestationData.attestation as `0x${string}`,
+      );
+      const signatureLength = 65;
+      const numSignatures = attestationBytes.length / signatureLength;
+
+      if (attestationBytes.length % signatureLength !== 0) {
+        throw new Error(`Invalid attestation length: ${attestationBytes.length}`);
+      }
+
+      let validSignatures = 0;
+
+      for (let i = 0; i < numSignatures; i++) {
+        const start = i * signatureLength;
+        const signature = attestationBytes.slice(start, start + signatureLength);
+
+        const recoveredAddress = await recoverAddress({
+          hash: messageHash,
+          signature: bytesToHex(signature),
+        });
+
+        const isValid = publicKeys.some(
+          (publicKey) =>
+            publicKeyToAddress(publicKey).toLowerCase() ===
+            recoveredAddress.toLowerCase(),
+        );
+
+        if (isValid) validSignatures++;
+      }
+
+      const threshold = Math.ceil(publicKeys.length / 2);
+      console.log(
+        `Valid signatures: ${validSignatures}/${numSignatures}, threshold: ${threshold}`,
+      );
+
+      return validSignatures >= threshold;
+    } catch (error) {
+      console.error(
+        "Error verifying attestation:",
+        error instanceof Error ? error.message : String(error),
+      );
+      return false;
+    }
+  }
+
+  const attestationData: AttestationData = {
+    message: "0x000000010000001a00000015...", // Full message hex from API
+    attestation: "0x3c5951abd82a83369d603ebaf9...", // Full attestation hex from API
+  };
+
+  // Example usage
+  const publicKeys = await getPublicKeys();
+  const isValid = await verifyAttestation(attestationData, publicKeys);
+  ```
+
+  ```ts Ethers.js theme={null}
+  import { ethers } from "ethers";
+
+  interface PublicKey {
+    publicKey: string;
+    cctpVersion: number;
+  }
+
+  interface AttestationData {
+    message: string;
+    attestation: string;
+  }
+
+  async function getPublicKeys() {
+    const response = await fetch(
+      "https://iris-api-sandbox.circle.com/v2/publicKeys",
+    );
+    const data = await response.json();
+
+    // Get all public keys for CCTP V2
+    const v2Keys = data.publicKeys
+      .filter((key: PublicKey) => key.cctpVersion === 2)
+      .map((key: PublicKey) => key.publicKey);
+
+    if (v2Keys.length === 0) {
+      throw new Error("CCTP V2 public key not found");
+    }
+
+    return v2Keys;
+  }
+
+  function verifyAttestation(
+    attestationData: AttestationData,
+    publicKeys: string[],
+  ) {
+    try {
+      const messageHash = ethers.keccak256(attestationData.message);
+      const attestationBytes = ethers.getBytes(attestationData.attestation);
+
+      // V2 attestation has multiple 65-byte signatures
+      const signatureLength = 65;
+      const numSignatures = attestationBytes.length / signatureLength;
+
+      if (attestationBytes.length % signatureLength !== 0) {
+        throw new Error(`Invalid attestation length: ${attestationBytes.length}`);
+      }
+
+      let validSignatures = 0;
+
+      // Verify each signature
+      for (let i = 0; i < numSignatures; i++) {
+        const start = i * signatureLength;
+        const sigBytes = attestationBytes.slice(start, start + signatureLength);
+
+        const r = ethers.hexlify(sigBytes.slice(0, 32));
+        const s = ethers.hexlify(sigBytes.slice(32, 64));
+        const v = sigBytes[64];
+
+        const signature = { r, s, v };
+        const recoveredAddress = ethers.recoverAddress(messageHash, signature);
+
+        // Check if recovered address matches any V2 public key
+        const isValid = publicKeys.some(
+          (publicKey) =>
+            ethers.computeAddress(publicKey).toLowerCase() ===
+            recoveredAddress.toLowerCase(),
+        );
+
+        if (isValid) validSignatures++;
+      }
+
+      const threshold = Math.ceil(publicKeys.length / 2);
+      console.log(
+        `Valid signatures: ${validSignatures}/${numSignatures}, threshold: ${threshold}`,
+      );
+
+      return validSignatures >= threshold;
+    } catch (error) {
+      console.error("Error verifying attestation:", (error as Error).message);
+      return false;
+    }
+  }
+
+  // Use attestation data from the API
+  const attestationData: AttestationData = {
+    message: "0x000000010000001a00000015...", // Full message hex from API
+    attestation: "0x3c5951abd82a83369d603ebaf9...", // Full attestation hex from API
+  };
+
+  // Example usage
+  const publicKeys = await getPublicKeys();
+  const isValid = verifyAttestation(attestationData, publicKeys);
+  ```
+</CodeGroup>

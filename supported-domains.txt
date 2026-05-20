@@ -1,0 +1,134 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.circle.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Supported Blockchains and Domains
+
+> Blockchains and domain identifiers supported by CCTP
+
+CCTP is available on multiple blockchains where USDC is natively issued. Each
+blockchain is assigned a unique domain identifier used in
+[CCTP contracts](/cctp/references/contract-addresses) and API calls.
+
+## Supported blockchains
+
+CCTP provides
+[Standard Transfer](/cctp/concepts/finality-and-block-confirmations#standard-transfer-attestation-times),
+[Fast Transfer](/cctp/concepts/finality-and-block-confirmations#fast-transfer-attestation-times),
+Hooks, and [Forwarding Service](/cctp/concepts/forwarding-service) capabilities
+on the following blockchains. All chains listed below are supported as
+destination chains.
+
+| Blockchain                  | Source (Standard transfer) | Source (Fast transfer) | Forwarding Service |
+| --------------------------- | -------------------------- | ---------------------- | ------------------ |
+| Arc Testnet                 | ✅                          | ❌                      | ✅                  |
+| Arbitrum                    | ✅                          | ✅                      | ✅                  |
+| Avalanche                   | ✅                          | ❌                      | ✅                  |
+| Base                        | ✅                          | ✅                      | ✅                  |
+| BNB Smart Chain (USYC only) | ✅                          | ✅                      | ❌                  |
+| Codex                       | ✅                          | ✅                      | ✅                  |
+| EDGE                        | ✅                          | ✅                      | ✅                  |
+| Ethereum                    | ✅                          | ✅                      | ✅                  |
+| HyperEVM                    | ✅                          | ❌                      | ✅                  |
+| Injective                   | ✅                          | ❌                      | ❌                  |
+| Ink                         | ✅                          | ✅                      | ✅                  |
+| Linea                       | ✅                          | ✅                      | ✅                  |
+| Monad                       | ✅                          | ❌                      | ✅                  |
+| Morph                       | ✅                          | ✅                      | ❌                  |
+| OP Mainnet                  | ✅                          | ✅                      | ✅                  |
+| Pharos                      | ✅                          | ❌                      | ❌                  |
+| Plume                       | ✅                          | ✅                      | ✅                  |
+| Polygon PoS                 | ✅                          | ❌                      | ✅                  |
+| Sei                         | ✅                          | ❌                      | ✅                  |
+| Solana                      | ✅                          | ✅                      | ✅                  |
+| Sonic                       | ✅                          | ❌                      | ✅                  |
+| Starknet                    | ✅                          | ✅                      | ❌                  |
+| Stellar                     | ✅                          | ✅                      | ❌                  |
+| Unichain                    | ✅                          | ✅                      | ✅                  |
+| World Chain                 | ✅                          | ✅                      | ✅                  |
+| XDC                         | ✅                          | ❌                      | ✅                  |
+
+<Note>
+  On Stellar, USDC precision and address encoding differ from other CCTP-supported
+  blockchains. For inbound transfers, use
+  [`CctpForwarder`](/cctp/references/stellar#use-cctpforwarder-for-stellar-recipients)
+  so funds reach the correct recipient. See
+  [CCTP on Stellar](/cctp/references/stellar).
+</Note>
+
+<Note>
+  **Forwarding Service support:**
+
+  The column labeled "Forwarding Service" indicates whether the blockchain is
+  available as a destination chain for the
+  [Circle Forwarding Service](/cctp/concepts/forwarding-service).
+
+  **Testnet support:**
+
+  If a mainnet is listed, its official testnet is also supported. For example,
+  Ethereum includes both Ethereum Mainnet and Ethereum Sepolia.
+
+  **Fast Transfer availability:**
+
+  [Fast Transfer](/cctp/concepts/fast-transfer-allowance) is available for source
+  chains only when it provides a meaningful speed improvement over standard burn
+  attestation times. For blockchains where standard attestation is already fast,
+  Fast Transfer does not provide additional value.
+</Note>
+
+## Domain identifiers
+
+A domain is a Circle-issued identifier for a blockchain where CCTP contracts are
+deployed. Domain identifiers don't map to existing public chain IDs.
+
+Use domain identifiers when calling CCTP contracts and API endpoints:
+
+| Domain | Blockchain      |
+| :----- | :-------------- |
+| 0      | Ethereum        |
+| 1      | Avalanche       |
+| 2      | OP Mainnet      |
+| 3      | Arbitrum        |
+| 5      | Solana          |
+| 6      | Base            |
+| 7      | Polygon PoS     |
+| 10     | Unichain        |
+| 11     | Linea           |
+| 12     | Codex           |
+| 13     | Sonic           |
+| 14     | World Chain     |
+| 15     | Monad           |
+| 16     | Sei             |
+| 17     | BNB Smart Chain |
+| 18     | XDC             |
+| 19     | HyperEVM        |
+| 21     | Ink             |
+| 22     | Plume           |
+| 25     | Starknet        |
+| 26     | Arc Testnet     |
+| 27     | Stellar         |
+| 28     | EDGE            |
+| 29     | Injective       |
+| 30     | Morph           |
+| 31     | Pharos          |
+
+## Supported tokens
+
+Not all domains support the same tokens:
+
+* [USDC](/stablecoins/what-is-usdc): Supported on all CCTP domains except BNB
+  Smart Chain
+* [USYC](/tokenized/usyc/overview): Supported only on Ethereum and BNB Smart
+  Chain
+
+## CCTP V1 (Legacy) only
+
+The following blockchains are supported only by CCTP V1 (Legacy). If you are
+building on these chains, refer to the [V1 documentation](/cctp/v1) for
+integration guides and contract references.
+
+| Blockchain | Domain | Documentation                                                                                                 |
+| ---------- | ------ | ------------------------------------------------------------------------------------------------------------- |
+| Aptos      | 9      | [Aptos packages](/cctp/v1/aptos-packages), [Quickstart](/cctp/v1/transfer-usdc-on-testnet-from-aptos-to-base) |
+| Noble      | 4      | [Noble Cosmos module](/cctp/v1/noble-cosmos-module)                                                           |
+| Sui        | 8      | [Sui packages](/cctp/v1/sui-packages), [Quickstart](/cctp/v1/transfer-usdc-on-testnet-from-sui-to-ethereum)   |

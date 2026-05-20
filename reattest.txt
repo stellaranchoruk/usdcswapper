@@ -1,0 +1,157 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.circle.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Re-attest a pre-finality message
+
+> The re-attestation flow allows the relayer to obtain a higher level of finality than was originally requested on the source chain, while still being forced to pay the fee since allowance was reserved. This flow resolves the case where a sender specifies a finality threshold lower than the destination chain recipient requires.
+
+
+
+
+## OpenAPI
+
+````yaml /openapi/cctp.yaml post /v2/reattest/{nonce}
+openapi: 3.0.2
+info:
+  version: '1.0'
+  title: Cross-Chain Transfer Protocol (CCTP)
+  description: >
+    Circle's Cross-Chain Transfer Protocol enables you to build seamless user
+    experiences for sending and transacting USDC natively across blockchains.
+
+
+    CCTP endpoints enable advanced capabilities such as fetching attestations
+    for faster-than-finality burn events, verifying public keys across versions,
+    accessing transaction details, querying Fast Transfer allowances and fees,
+    and initiating re-attestation processes.
+servers:
+  - url: https://iris-api-sandbox.circle.com
+  - url: https://iris-api.circle.com
+security: []
+tags:
+  - name: CCTP
+    description: Cross-Chain Transfer Protocol endpoints
+  - name: CCTP V1 (Legacy)
+    description: Legacy Cross-Chain Transfer Protocol endpoints
+paths:
+  /v2/reattest/{nonce}:
+    post:
+      tags:
+        - CCTP
+      summary: Re-attest a pre-finality message
+      description: >
+        The re-attestation flow allows the relayer to obtain a higher level of
+        finality than was originally requested on the source chain, while still
+        being forced to pay the fee since allowance was reserved. This flow
+        resolves the case where a sender specifies a finality threshold lower
+        than the destination chain recipient requires.
+      operationId: reattestMessage
+      parameters:
+        - $ref: '#/components/parameters/NoncePath'
+      responses:
+        '200':
+          description: Successfully started the re-attestation process.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReattestationResponseV2'
+              examples:
+                response:
+                  value:
+                    message: Re-attestation successfully requested for nonce.
+                    nonce: '234'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  parameters:
+    NoncePath:
+      name: nonce
+      in: path
+      required: true
+      description: |
+        The nonce of the pre-finality message to re-attest as finalized.
+      schema:
+        type: string
+        example: '234'
+  schemas:
+    ReattestationResponseV2:
+      title: ReattestMessageResponse
+      type: object
+      properties:
+        message:
+          type: string
+          description: Confirmation that the re-attestation process has started.
+          example: Re-attestation successfully requested for nonce.
+        nonce:
+          $ref: '#/components/schemas/MessageNonce'
+    MessageNonce:
+      type: string
+      description: The nonce associated with the message.
+      example: '9682'
+    XRequestId:
+      type: string
+      format: uuid
+      description: >-
+        A unique identifier, which can be helpful for identifying a request when
+        communicating with Circle support.
+      example: 2adba88e-9d63-44bc-b975-9b6ae3440dde
+  responses:
+    BadRequest:
+      content:
+        application/json:
+          schema:
+            type: object
+            title: BadRequestResponse
+            required:
+              - code
+              - message
+            properties:
+              code:
+                type: integer
+                description: Code that corresponds to the error.
+              message:
+                type: string
+                description: Message that describes the error.
+            example:
+              code: 400
+              message: Bad request.
+      description: Request cannot be processed due to a client error.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+    NotFound:
+      content:
+        application/json:
+          schema:
+            type: object
+            title: NotFoundResponse
+            required:
+              - code
+              - message
+            properties:
+              code:
+                type: integer
+                description: Code that corresponds to the error.
+              message:
+                type: string
+                description: Message that describes the error.
+            example:
+              code: 404
+              message: Not found.
+      description: Specified resource was not found.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+  headers:
+    XRequestId:
+      description: >
+        Developer-provided header parameter or Circle-generated universally
+        unique identifier (UUID v4). Useful for identifying a specific request
+        when communicating with Circle Support.
+      schema:
+        $ref: '#/components/schemas/XRequestId'
+
+````

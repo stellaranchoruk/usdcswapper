@@ -1,0 +1,275 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.circle.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# EVM Contract Interfaces
+
+> Public methods and events for CCTP smart contracts on EVM-compatible blockchains
+
+This page documents the public methods and events exposed by CCTP smart
+contracts on EVM-compatible blockchains.
+
+## Contract responsibilities
+
+* **TokenMessengerV2**: Entrypoint for crosschain USDC transfer. Routes messages
+  to burn USDC on a source blockchain and mint USDC on a destination blockchain.
+* **MessageTransmitterV2**: Generic message passing. Sends all messages on the
+  source blockchain and receives all messages on the destination blockchain.
+* **TokenMinterV2**: Responsible for minting and burning USDC. Contains
+  blockchain-specific settings used by burners and minters.
+* **MessageV2**: Provides helper functions for crosschain transfers, such as
+  `bytes32ToAddress` and `addressToBytes32`, which are commonly used when
+  bridging between EVM and non-EVM blockchains.
+
+<Note>
+  **Gas optimization tip:** If you're writing your own integration, it's more
+  gas-efficient to
+  [include address conversion logic directly in your contract](https://github.com/circlefin/evm-cctp-contracts/blob/5f1901a9791b18204e8556bb53fb0dfcb05a832a/src/messages/Message.sol#L146)
+  rather than calling an external contract.
+</Note>
+
+Full contract source code is
+[available on GitHub](https://github.com/circlefin/evm-cctp-contracts).
+
+## TokenMessengerV2
+
+### depositForBurn
+
+Deposits and burns tokens from sender to be minted on destination domain. Minted
+tokens will be transferred to `mintRecipient`.
+
+<Note>
+  **Note:** There is a \$10 million limit on the amount of USDC that can be burned
+  in a single CCTP transaction. If the amount exceeds this limit, the transaction
+  will revert. If you need to transfer more than this limit, break up your
+  transfers into multiple transactions.
+
+  For Fast Transfers, you should always
+  [check the remaining allowance](/api-reference/cctp/all/get-fast-burn-usdc-allowance)
+  before initiating a transfer to ensure there is enough to complete your
+  transfer.
+</Note>
+
+**Parameters**
+
+| Field                  | Type      | Description                                                                                                                               |
+| ---------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `amount`               | `uint256` | Amount of tokens to deposit and burn                                                                                                      |
+| `destinationDomain`    | `uint32`  | Destination [domain ID](/cctp/concepts/supported-chains-and-domains#domain-identifiers) to send the message to                            |
+| `mintRecipient`        | `bytes32` | Address of mint recipient on destination domain (must be converted to 32 byte array, that is, prefix with zeros if needed)                |
+| `burnToken`            | `address` | Address of contract to burn deposited tokens on local domain                                                                              |
+| `destinationCaller`    | `bytes32` | Address as `bytes32` which can call `receiveMessage` on destination domain. If set to `bytes32(0)`, any address can call `receiveMessage` |
+| `maxFee`               | `uint256` | Maximum [fee](/cctp/concepts/fees) paid for transfer, specified in units of `burnToken`                                                   |
+| `minFinalityThreshold` | `uint32`  | Minimum [finality threshold](/cctp/concepts/finality-and-block-confirmations) at which burn will be attested                              |
+
+**Example**
+
+```solidity Solidity theme={null}
+// Burn 100 USDC on Ethereum for minting on Avalanche
+uint256 amount = 100 * 10**6; // 100 USDC
+uint32 destinationDomain = 1; // Avalanche
+bytes32 mintRecipient = bytes32(uint256(uint160(recipientAddress)));
+address burnToken = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48; // USDC on Ethereum
+bytes32 destinationCaller = bytes32(0); // Anyone can call receiveMessage
+uint256 maxFee = 1000; // 0.001 USDC max fee
+uint32 minFinalityThreshold = 1000; // Fast Transfer
+
+tokenMessenger.depositForBurn(
+  amount,
+  destinationDomain,
+  mintRecipient,
+  burnToken,
+  destinationCaller,
+  maxFee,
+  minFinalityThreshold
+);
+```
+
+### depositForBurnWithHook
+
+Deposits and burns tokens from sender to be minted on destination domain, and
+emits a crosschain message with additional hook data appended. In addition to
+the standard `depositForBurn` parameters, `depositForBurnWithHook` accepts a
+dynamic-length `hookData` parameter, allowing you to include additional metadata
+that can trigger custom logic on the destination blockchain.
+
+<Note>
+  **Note:** There is a \$10 million limit on the amount of USDC that can be burned
+  in a single CCTP transaction. If the amount exceeds this limit, the transaction
+  will revert. If you need to transfer more than this limit, break up your
+  transfers into multiple transactions.
+
+  For Fast Transfers, you should always
+  [check the remaining allowance](/api-reference/cctp/all/get-fast-burn-usdc-allowance)
+  before initiating a transfer to ensure there is enough to complete your
+  transfer.
+</Note>
+
+**Parameters**
+
+| Field                  | Type      | Description                                                                                                                               |
+| ---------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `amount`               | `uint256` | Amount of tokens to burn                                                                                                                  |
+| `destinationDomain`    | `uint32`  | Destination domain to send the message to                                                                                                 |
+| `mintRecipient`        | `bytes32` | Address of mint recipient on destination domain (must be converted to 32 byte array, that is, prefix with zeros if needed)                |
+| `burnToken`            | `address` | Address of contract to burn deposited tokens on local domain                                                                              |
+| `destinationCaller`    | `bytes32` | Address as `bytes32` which can call `receiveMessage` on destination domain. If set to `bytes32(0)`, any address can call `receiveMessage` |
+| `maxFee`               | `uint256` | Maximum fee paid for transfer, specified in units of `burnToken`                                                                          |
+| `minFinalityThreshold` | `uint32`  | Minimum finality threshold at which burn will be attested                                                                                 |
+| `hookData`             | `bytes`   | Additional metadata attached to the attested message, used to trigger custom logic on the destination blockchain                          |
+
+### getMinFeeAmount
+
+Calculates and returns the minimum fee required for a given amount in a Standard
+Transfer. If the minimum fee (per unit of `burnToken`) is non-zero, the
+specified `maxFee` must be at least the returned minimum fee. Otherwise, the
+burn will revert onchain.
+
+**Parameters**
+
+| Field    | Type      | Description                                                                                     |
+| -------- | --------- | ----------------------------------------------------------------------------------------------- |
+| `amount` | `uint256` | The amount used to compute the minimum fee. Must be greater than `1` if standard fee is applied |
+
+### handleReceiveFinalizedMessage
+
+Handles incoming message received by the local MessageTransmitter. For a burn
+message, mints the associated token to the requested recipient on the local
+domain. Validates the function sender is the local MessageTransmitter, and the
+remote sender is a registered remote TokenMessenger for `remoteDomain`.
+
+This method is called for messages where `finalityThresholdExecuted` ≥ 2000
+(Standard Transfer).
+
+**Parameters**
+
+| Field                       | Type                     | Description                                                    |
+| --------------------------- | ------------------------ | -------------------------------------------------------------- |
+| `remoteDomain`              | `uint32`                 | The domain where the message originated from                   |
+| `sender`                    | `bytes32`                | The sender of the message (remote TokenMessenger)              |
+| `finalityThresholdExecuted` | `uint32`                 | Specifies the level of finality Circle signed the message with |
+| `messageBody`               | `bytes` (dynamic length) | The message body bytes                                         |
+
+### handleReceiveUnfinalizedMessage
+
+Handles incoming message received by the local MessageTransmitter. For a burn
+message, mints the associated token to the requested recipient on the local
+domain. Similar to `handleReceiveFinalizedMessage`, but is called for messages
+which are not finalized (`finalityThresholdExecuted` \< 2000) such as Fast
+Transfers.
+
+Unlike `handleReceiveFinalizedMessage`, `handleReceiveUnfinalizedMessage`
+processes messages with:
+
+* **`expirationBlock`**: If `expirationBlock` ≤ `blockNumber` on the destination
+  domain, the message will revert and must be re-signed without the expiration
+  block.
+* **`feeExecuted`**: If nonzero, the `feeExecuted` amount is minted to the
+  `feeRecipient`.
+
+**Parameters**
+
+| Field                       | Type                     | Description                                                                                  |
+| --------------------------- | ------------------------ | -------------------------------------------------------------------------------------------- |
+| `remoteDomain`              | `uint32`                 | The domain where the message originated from                                                 |
+| `sender`                    | `bytes32`                | The sender of the message (remote TokenMessenger)                                            |
+| `finalityThresholdExecuted` | `uint32`                 | Specifies the level of finality Circle signed the message with                               |
+| `messageBody`               | `bytes` (dynamic length) | The message body bytes (see [Message format](/cctp/references/technical-guide#message-body)) |
+
+## MessageTransmitterV2
+
+### `receiveMessage`
+
+Receives message on destination blockchain by passing message and attestation.
+Emits `MessageReceived` event. Messages with a given nonce can only be broadcast
+successfully once for a pair of domains. The message body of a valid message is
+passed to the specified recipient for further processing.
+
+**Parameters**
+
+| Field         | Type    | Description                                                                           |
+| ------------- | ------- | ------------------------------------------------------------------------------------- |
+| `message`     | `bytes` | Encoded message (see [Message format](/cctp/references/technical-guide#message-body)) |
+| `attestation` | `bytes` | Signed attestation received from Circle's attestation service                         |
+
+**Example**
+
+```solidity Solidity theme={null}
+// Mint USDC on destination chain
+bytes memory message = attestationData.message;
+bytes memory attestation = attestationData.attestation;
+
+messageTransmitter.receiveMessage(message, attestation);
+```
+
+### `sendMessage`
+
+Sends a message to the recipient on the destination domain. Emits a
+`MessageSent` event which will be attested by Circle's attestation service.
+
+**Parameters**
+
+| Field                  | Type      | Description                                                                                                                                                                                |
+| ---------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `destinationDomain`    | `uint32`  | Destination domain ID to send the message to                                                                                                                                               |
+| `recipient`            | `bytes32` | Address of recipient on destination domain                                                                                                                                                 |
+| `destinationCaller`    | `bytes32` | Address as `bytes32` which can call `receiveMessage` on destination domain. If set to `bytes32(0)`, any address can call `receiveMessage`                                                  |
+| `minFinalityThreshold` | `uint32`  | Minimum finality threshold requested. A value greater than 2000 is interpreted as 2000 (finalized). Thresholds: 1000 for Fast Transfer (confirmed), 2000 for Standard Transfer (finalized) |
+| `messageBody`          | `bytes`   | application-specific message to be handled by recipient                                                                                                                                    |
+
+## Events
+
+### DepositForBurn
+
+Emitted when USDC is burned on the source blockchain.
+
+**Parameters**
+
+| Field                       | Type      | Indexed | Description                                                 |
+| --------------------------- | --------- | ------- | ----------------------------------------------------------- |
+| `nonce`                     | `uint64`  | Yes     | Unique message identifier                                   |
+| `burnToken`                 | `address` | Yes     | Address of token burned                                     |
+| `amount`                    | `uint256` | No      | Burn amount                                                 |
+| `depositor`                 | `address` | Yes     | Address of depositor                                        |
+| `mintRecipient`             | `bytes32` | No      | Mint recipient address on destination domain                |
+| `destinationDomain`         | `uint32`  | No      | Destination domain identifier                               |
+| `destinationTokenMessenger` | `bytes32` | No      | Address of TokenMessenger contract on destination domain    |
+| `destinationCaller`         | `bytes32` | No      | Authorized caller of `receiveMessage` on destination domain |
+| `maxFee`                    | `uint256` | No      | Maximum fee for the transfer                                |
+| `minFinalityThreshold`      | `uint32`  | No      | Minimum finality threshold at which burn will be attested   |
+
+### MessageSent
+
+Emitted when a message is sent from the source blockchain.
+
+**Parameters**
+
+| Field     | Type    | Indexed | Description          |
+| --------- | ------- | ------- | -------------------- |
+| `message` | `bytes` | No      | Raw bytes of message |
+
+### MessageReceived
+
+Emitted when a message is received on the destination blockchain.
+
+**Parameters**
+
+| Field          | Type      | Indexed | Description                                |
+| -------------- | --------- | ------- | ------------------------------------------ |
+| `caller`       | `address` | Yes     | Address that called `receiveMessage`       |
+| `sourceDomain` | `uint32`  | Yes     | Source domain identifier                   |
+| `nonce`        | `uint64`  | Yes     | Unique message identifier                  |
+| `sender`       | `bytes32` | No      | Address of message sender on source domain |
+| `messageBody`  | `bytes`   | No      | Message body                               |
+
+### MintAndWithdraw
+
+Emitted when USDC is minted on the destination blockchain.
+
+**Parameters**
+
+| Field           | Type      | Indexed | Description                   |
+| --------------- | --------- | ------- | ----------------------------- |
+| `mintRecipient` | `address` | Yes     | Address receiving minted USDC |
+| `amount`        | `uint256` | No      | Amount minted                 |
+| `mintToken`     | `address` | Yes     | Address of token minted       |

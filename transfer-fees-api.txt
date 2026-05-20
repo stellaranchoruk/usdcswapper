@@ -1,0 +1,216 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.circle.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Get USDC transfer fees
+
+> Retrieves the applicable fees for a USDC transfer between the specified source and destination domains. The fee is returned in basis points (1 = 0.01%).
+
+
+
+## OpenAPI
+
+````yaml /openapi/cctp.yaml get /v2/burn/USDC/fees/{sourceDomainId}/{destDomainId}
+openapi: 3.0.2
+info:
+  version: '1.0'
+  title: Cross-Chain Transfer Protocol (CCTP)
+  description: >
+    Circle's Cross-Chain Transfer Protocol enables you to build seamless user
+    experiences for sending and transacting USDC natively across blockchains.
+
+
+    CCTP endpoints enable advanced capabilities such as fetching attestations
+    for faster-than-finality burn events, verifying public keys across versions,
+    accessing transaction details, querying Fast Transfer allowances and fees,
+    and initiating re-attestation processes.
+servers:
+  - url: https://iris-api-sandbox.circle.com
+  - url: https://iris-api.circle.com
+security: []
+tags:
+  - name: CCTP
+    description: Cross-Chain Transfer Protocol endpoints
+  - name: CCTP V1 (Legacy)
+    description: Legacy Cross-Chain Transfer Protocol endpoints
+paths:
+  /v2/burn/USDC/fees/{sourceDomainId}/{destDomainId}:
+    get:
+      tags:
+        - CCTP
+      summary: Get USDC transfer fees
+      description: >-
+        Retrieves the applicable fees for a USDC transfer between the specified
+        source and destination domains. The fee is returned in basis points (1 =
+        0.01%).
+      operationId: getBurnUsdcFees
+      parameters:
+        - $ref: '#/components/parameters/SourceDomainIdPath'
+        - $ref: '#/components/parameters/DestinationDomainIdPath'
+        - in: query
+          name: forward
+          description: >-
+            Whether to include fees for using the Circle Forwarder in the return
+            value.
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - in: query
+          name: hyperCoreDeposit
+          description: >-
+            Whether to include the forwarding fee for depositing into HyperCore
+            in the return value. This parameter should only be used if the
+            `forward` parameter is set to `true` and the destination domain is
+            HyperEVM.
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Successfully retrieved the USDC transfer fees.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/USDCBurnFeesResponseV2'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  parameters:
+    SourceDomainIdPath:
+      name: sourceDomainId
+      description: Source domain identifier for a blockchain on CCTP.
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+        example: 3
+    DestinationDomainIdPath:
+      name: destDomainId
+      description: Destination domain identifier for a blockchain on CCTP.
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+        example: 3
+  schemas:
+    USDCBurnFeesResponseV2:
+      title: GetBurnUSDCFeesResponse
+      type: array
+      items:
+        type: object
+        required:
+          - finalityThreshold
+          - minimumFee
+        properties:
+          finalityThreshold:
+            type: integer
+            description: >-
+              The finality threshold, such as block confirmations, used to
+              determine whether the transfer qualifies as a Fast or Standard
+              Transfer.
+          minimumFee:
+            type: number
+            description: >-
+              Minimum fees for the transfer, expressed in basis points (bps).
+              For example, 1 = 0.01%.
+          forwardFee:
+            type: object
+            description: >-
+              Gas and forwarding fees for using the Circle Forwarder in USDC
+              minor units.
+            properties:
+              low:
+                type: integer
+                description: The low gas estimate plus forwarding fee.
+                example: 90
+              medium:
+                type: integer
+                description: The medium gas estimate plus forwarding fee.
+                example: 110
+              high:
+                type: integer
+                description: The high gas estimate plus forwarding fee.
+                example: 160
+      example:
+        - finalityThreshold: 1000
+          minimumFee: 1
+          forwardFee:
+            low: 90
+            medium: 110
+            high: 160
+        - finalityThreshold: 2000
+          minimumFee: 0
+          forwardFee:
+            low: 90
+            medium: 110
+            high: 160
+    XRequestId:
+      type: string
+      format: uuid
+      description: >-
+        A unique identifier, which can be helpful for identifying a request when
+        communicating with Circle support.
+      example: 2adba88e-9d63-44bc-b975-9b6ae3440dde
+  responses:
+    BadRequest:
+      content:
+        application/json:
+          schema:
+            type: object
+            title: BadRequestResponse
+            required:
+              - code
+              - message
+            properties:
+              code:
+                type: integer
+                description: Code that corresponds to the error.
+              message:
+                type: string
+                description: Message that describes the error.
+            example:
+              code: 400
+              message: Bad request.
+      description: Request cannot be processed due to a client error.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+    NotFound:
+      content:
+        application/json:
+          schema:
+            type: object
+            title: NotFoundResponse
+            required:
+              - code
+              - message
+            properties:
+              code:
+                type: integer
+                description: Code that corresponds to the error.
+              message:
+                type: string
+                description: Message that describes the error.
+            example:
+              code: 404
+              message: Not found.
+      description: Specified resource was not found.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+  headers:
+    XRequestId:
+      description: >
+        Developer-provided header parameter or Circle-generated universally
+        unique identifier (UUID v4). Useful for identifying a specific request
+        when communicating with Circle Support.
+      schema:
+        $ref: '#/components/schemas/XRequestId'
+
+````

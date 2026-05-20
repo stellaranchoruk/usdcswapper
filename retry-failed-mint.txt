@@ -1,0 +1,428 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.circle.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Retry a Failed Mint
+
+> Complete a CCTP transfer when the mint transaction fails
+
+This guide helps you complete a CCTP transfer when you have a valid attestation
+but the mint transaction on the destination blockchain fails or was never
+submitted.
+
+## Minting is safe to retry
+
+CCTP minting is idempotent. Each attestation contains a unique nonce that can
+only be used once. If you submit the same attestation multiple times, only the
+first successful transaction mints USDC. Subsequent attempts revert with a
+"nonce already used" error but don't result in duplicate minting.
+
+This means you can safely retry a failed mint without risking double-spending.
+
+## Common mint failure reasons
+
+| Failure reason                       | Symptoms                                    | Solution                                                                                      |
+| ------------------------------------ | ------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Insufficient gas                     | Transaction reverts or times out            | Increase gas limit and retry                                                                  |
+| Nonce already used                   | Transaction reverts with nonce error        | The mint already succeeded; check recipient balance                                           |
+| Wrong contract address               | Transaction may succeed with no USDC minted | Verify you're using the correct `MessageTransmitterV2` address for the destination blockchain |
+| Destination caller restriction       | Transaction reverts                         | Check if the burn specified a `destinationCaller`; only that address can mint                 |
+| Token account doesn't exist (Solana) | Transaction fails                           | Create the recipient's USDC token account first                                               |
+| Attestation expired                  | Transaction reverts                         | Use re-attestation API to get a fresh attestation                                             |
+
+## Verify the current state
+
+Before retrying, check whether the mint already succeeded:
+
+<Steps>
+  <Step title="Check recipient balance">
+    Query the recipient's USDC balance on the destination blockchain. If the
+    expected amount is present, the mint already completed.
+  </Step>
+
+  <Step title="Check for existing mint transaction">
+    Search the destination blockchain's block explorer for `receiveMessage`
+    transactions from your wallet to the `MessageTransmitterV2` contract.
+  </Step>
+
+  <Step title="Check attestation status">
+    Query the [attestation API](/api-reference/cctp/all/get-messages-v2) to confirm
+    you have a `complete` status:
+  </Step>
+</Steps>
+
+## Retry the mint transaction
+
+If the mint hasn't completed, submit a new `receiveMessage` transaction using
+your attestation.
+
+<Tabs>
+  <Tab title="EVM chains">
+    Call `receiveMessage` on the `MessageTransmitterV2` contract:
+
+    ```ts TypeScript theme={null}
+    import {
+      createWalletClient,
+      createPublicClient,
+      http,
+      encodeFunctionData,
+    } from "viem";
+    import { privateKeyToAccount } from "viem/accounts";
+    import { arcTestnet } from "viem/chains";
+
+    interface AttestationData {
+      message: string;
+      attestation: string;
+    }
+
+    const PRIVATE_KEY = process.env.EVM_PRIVATE_KEY!;
+    const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`);
+
+    const walletClient = createWalletClient({
+      chain: arcTestnet,
+      transport: http(),
+      account,
+    });
+    const publicClient = createPublicClient({
+      chain: arcTestnet,
+      transport: http(),
+    });
+
+    // MessageTransmitterV2 contract address - verify for your destination chain
+    // See: https://developers.circle.com/cctp/references/contract-addresses
+    const MESSAGE_TRANSMITTER_V2 = "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275";
+
+    async function retryMint(data: AttestationData) {
+      console.log("Retrying mint transaction...");
+
+      try {
+        const txHash = await walletClient.sendTransaction({
+          to: MESSAGE_TRANSMITTER_V2,
+          data: encodeFunctionData({
+            abi: [
+              {
+                type: "function",
+                name: "receiveMessage",
+                stateMutability: "nonpayable",
+                inputs: [
+                  { name: "message", type: "bytes" },
+                  { name: "attestation", type: "bytes" },
+                ],
+                outputs: [],
+              },
+            ],
+            functionName: "receiveMessage",
+            args: [
+              data.message as `0x${string}`,
+              data.attestation as `0x${string}`,
+            ],
+          }),
+        });
+
+        console.log(`Mint transaction submitted: ${txHash}`);
+
+        // Wait for confirmation
+        const receipt = await publicClient.waitForTransactionReceipt({
+          hash: txHash,
+        });
+
+        if (receipt.status === "success") {
+          console.log("Mint successful!");
+          return { success: true, txHash };
+        } else {
+          console.log("Mint transaction reverted");
+          return { success: false, txHash };
+        }
+      } catch (error) {
+        // Check if the error indicates nonce already used
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes("nonce") || errorMessage.includes("already")) {
+          console.log(
+            "Nonce already used - mint may have already completed. Check recipient balance.",
+          );
+        }
+        throw error;
+      }
+    }
+
+    // Use attestation data from the API
+    const attestationData: AttestationData = {
+      message: "0x00000001000000000000001a...", // Full message hex from API
+      attestation: "0xde09db65dea64090570d8143...", // Full attestation hex from API
+    };
+
+    await retryMint(attestationData);
+    ```
+  </Tab>
+
+  <Tab title="Solana">
+    Call `receiveMessage` on the `MessageTransmitterV2` program. For Solana, ensure
+    the recipient's USDC token account exists before calling `receiveMessage`.
+
+    ```ts TypeScript theme={null}
+    import crypto from "crypto";
+    import {
+      address,
+      createKeyPairSignerFromBytes,
+      createSolanaRpc,
+      createSolanaRpcSubscriptions,
+      createTransactionMessage,
+      getAddressEncoder,
+      getProgramDerivedAddress,
+      getSignatureFromTransaction,
+      pipe,
+      sendAndConfirmTransactionFactory,
+      setTransactionMessageFeePayerSigner,
+      setTransactionMessageLifetimeUsingBlockhash,
+      appendTransactionMessageInstruction,
+      signTransactionMessageWithSigners,
+    } from "@solana/kit";
+    import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
+    import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+
+    interface AttestationData {
+      message: string;
+      attestation: string;
+    }
+
+    // Solana Configuration
+    const SOLANA_RPC = "https://api.devnet.solana.com";
+    const SOLANA_WS = "wss://api.devnet.solana.com";
+    const rpc = createSolanaRpc(SOLANA_RPC);
+    const rpcSubscriptions = createSolanaRpcSubscriptions(SOLANA_WS);
+    const solanaPrivateKey = JSON.parse(process.env.SOLANA_PRIVATE_KEY!);
+    const solanaKeypair = await createKeyPairSignerFromBytes(
+      Uint8Array.from(solanaPrivateKey),
+    );
+
+    // Solana CCTP Program Addresses (Devnet)
+    const MESSAGE_TRANSMITTER_PROGRAM = address(
+      "CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC",
+    );
+    const TOKEN_MESSENGER_MINTER_PROGRAM = address(
+      "CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe",
+    );
+    const USDC_MINT = address("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
+    const ASSOCIATED_TOKEN_PROGRAM = address(
+      "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+    );
+
+    async function retryMintOnSolana(
+      attestationData: AttestationData,
+      sourceDomain: number,
+    ) {
+      console.log("Retrying mint on Solana...");
+
+      const addressEncoder = getAddressEncoder();
+
+      // Derive receiver's USDC token account
+      const [receiverUsdcAccount] = await getProgramDerivedAddress({
+        programAddress: ASSOCIATED_TOKEN_PROGRAM,
+        seeds: [
+          addressEncoder.encode(solanaKeypair.address),
+          addressEncoder.encode(TOKEN_PROGRAM_ADDRESS),
+          addressEncoder.encode(USDC_MINT),
+        ],
+      });
+
+      // Derive required PDAs
+      const [messageTransmitter] = await getProgramDerivedAddress({
+        programAddress: MESSAGE_TRANSMITTER_PROGRAM,
+        seeds: [new TextEncoder().encode("message_transmitter")],
+      });
+
+      const [authorityPda] = await getProgramDerivedAddress({
+        programAddress: MESSAGE_TRANSMITTER_PROGRAM,
+        seeds: [new TextEncoder().encode("message_transmitter_authority")],
+      });
+
+      // Calculate used nonces PDA
+      const messageBytes = Buffer.from(attestationData.message.slice(2), "hex");
+      const nonce = messageBytes.readBigUInt64BE(12);
+      const firstNonce = (nonce / 6400n) * 6400n;
+      const firstNonceBuffer = Buffer.alloc(8);
+      firstNonceBuffer.writeBigUInt64BE(firstNonce);
+
+      const sourceDomainBuffer = Buffer.alloc(4);
+      sourceDomainBuffer.writeUInt32BE(sourceDomain);
+
+      const [usedNonces] = await getProgramDerivedAddress({
+        programAddress: MESSAGE_TRANSMITTER_PROGRAM,
+        seeds: [
+          new TextEncoder().encode("used_nonces"),
+          sourceDomainBuffer,
+          firstNonceBuffer,
+        ],
+      });
+
+      // Derive TokenMessengerMinterV2 PDAs
+      const [tokenMessenger] = await getProgramDerivedAddress({
+        programAddress: TOKEN_MESSENGER_MINTER_PROGRAM,
+        seeds: [new TextEncoder().encode("token_messenger")],
+      });
+
+      const [remoteTokenMessenger] = await getProgramDerivedAddress({
+        programAddress: TOKEN_MESSENGER_MINTER_PROGRAM,
+        seeds: [
+          new TextEncoder().encode("remote_token_messenger"),
+          new TextEncoder().encode(sourceDomain.toString()),
+        ],
+      });
+
+      const [tokenMinter] = await getProgramDerivedAddress({
+        programAddress: TOKEN_MESSENGER_MINTER_PROGRAM,
+        seeds: [new TextEncoder().encode("token_minter")],
+      });
+
+      const [localToken] = await getProgramDerivedAddress({
+        programAddress: TOKEN_MESSENGER_MINTER_PROGRAM,
+        seeds: [
+          new TextEncoder().encode("local_token"),
+          addressEncoder.encode(USDC_MINT),
+        ],
+      });
+
+      const sourceTokenBytes = messageBytes.slice(133, 165);
+      const [tokenPair] = await getProgramDerivedAddress({
+        programAddress: TOKEN_MESSENGER_MINTER_PROGRAM,
+        seeds: [
+          new TextEncoder().encode("token_pair"),
+          sourceDomainBuffer,
+          sourceTokenBytes,
+        ],
+      });
+
+      const [custody] = await getProgramDerivedAddress({
+        programAddress: TOKEN_MESSENGER_MINTER_PROGRAM,
+        seeds: [
+          new TextEncoder().encode("custody"),
+          addressEncoder.encode(USDC_MINT),
+        ],
+      });
+
+      const [eventAuthority] = await getProgramDerivedAddress({
+        programAddress: MESSAGE_TRANSMITTER_PROGRAM,
+        seeds: [new TextEncoder().encode("__event_authority")],
+      });
+
+      const [tokenProgramEventAuthority] = await getProgramDerivedAddress({
+        programAddress: TOKEN_MESSENGER_MINTER_PROGRAM,
+        seeds: [new TextEncoder().encode("__event_authority")],
+      });
+
+      // Build instruction
+      const discriminator = crypto
+        .createHash("sha256")
+        .update("global:receive_message")
+        .digest()
+        .slice(0, 8);
+
+      const messageBuffer = Buffer.from(attestationData.message.slice(2), "hex");
+      const attestationBuffer = Buffer.from(
+        attestationData.attestation.slice(2),
+        "hex",
+      );
+
+      const messageLenBuffer = Buffer.alloc(4);
+      messageLenBuffer.writeUInt32LE(messageBuffer.length);
+
+      const attestationLenBuffer = Buffer.alloc(4);
+      attestationLenBuffer.writeUInt32LE(attestationBuffer.length);
+
+      const instructionData = new Uint8Array(
+        Buffer.concat([
+          discriminator,
+          messageLenBuffer,
+          messageBuffer,
+          attestationLenBuffer,
+          attestationBuffer,
+        ]),
+      );
+
+      const receiveMessageIx = {
+        programAddress: MESSAGE_TRANSMITTER_PROGRAM,
+        accounts: [
+          { address: solanaKeypair.address, role: 3, signer: solanaKeypair },
+          { address: solanaKeypair.address, role: 0 },
+          { address: authorityPda, role: 0 },
+          { address: messageTransmitter, role: 0 },
+          { address: usedNonces, role: 1 },
+          { address: TOKEN_MESSENGER_MINTER_PROGRAM, role: 0 },
+          { address: SYSTEM_PROGRAM_ADDRESS, role: 0 },
+          { address: eventAuthority, role: 0 },
+          { address: MESSAGE_TRANSMITTER_PROGRAM, role: 0 },
+          { address: tokenMessenger, role: 0 },
+          { address: remoteTokenMessenger, role: 0 },
+          { address: tokenMinter, role: 1 },
+          { address: localToken, role: 1 },
+          { address: tokenPair, role: 0 },
+          { address: receiverUsdcAccount, role: 1 },
+          { address: custody, role: 1 },
+          { address: TOKEN_PROGRAM_ADDRESS, role: 0 },
+          { address: tokenProgramEventAuthority, role: 0 },
+          { address: TOKEN_MESSENGER_MINTER_PROGRAM, role: 0 },
+        ],
+        data: instructionData,
+      };
+
+      const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
+
+      const transactionMessage = pipe(
+        createTransactionMessage({ version: 0 }),
+        (tx) => setTransactionMessageFeePayerSigner(solanaKeypair, tx),
+        (tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
+        (tx) => appendTransactionMessageInstruction(receiveMessageIx, tx),
+      );
+
+      const signedTransaction =
+        await signTransactionMessageWithSigners(transactionMessage);
+
+      const sendAndConfirmTransaction = sendAndConfirmTransactionFactory({
+        rpc,
+        rpcSubscriptions,
+      });
+
+      try {
+        await sendAndConfirmTransaction(
+          signedTransaction as Parameters<typeof sendAndConfirmTransaction>[0],
+          {
+            commitment: "confirmed",
+          },
+        );
+
+        const signature = getSignatureFromTransaction(signedTransaction);
+        console.log(`Mint successful! Signature: ${signature}`);
+        return signature;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("already been processed")) {
+          console.log("Nonce already used - mint may have already completed.");
+        }
+        throw error;
+      }
+    }
+
+    // Use attestation data from the API
+    const attestationData: AttestationData = {
+      message: "0x000000000000000500000000...", // Full message hex from API
+      attestation: "0xdc485fb2f9a8f68c871f4ca7386dee9086ff9d43...", // Full attestation hex from API
+    };
+
+    await retryMintOnSolana(attestationData, 0); // 0 = Ethereum Sepolia domain
+    ```
+
+    <Note>
+      **Note:** The recipient's USDC token account must exist before calling
+      `receiveMessage`. If the account doesn't exist, create it using the Associated
+      Token Program before retrying the mint.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Handle destination caller restrictions
+
+If the burn specified a `destinationCaller` address, only that address can call
+`receiveMessage`. If you're seeing authorization errors:
+
+1. Check the `destinationCaller` field in the attestation's `decodedMessage`
+2. If it's not `0x0000...0000`, ensure you're calling from the specified address

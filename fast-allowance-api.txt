@@ -1,0 +1,78 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.circle.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Get USDC Fast Transfer allowance
+
+> Retrieves the available USDC Fast Transfer allowance remaining.
+
+
+
+## OpenAPI
+
+````yaml /openapi/cctp.yaml get /v2/fastBurn/USDC/allowance
+openapi: 3.0.2
+info:
+  version: '1.0'
+  title: Cross-Chain Transfer Protocol (CCTP)
+  description: >
+    Circle's Cross-Chain Transfer Protocol enables you to build seamless user
+    experiences for sending and transacting USDC natively across blockchains.
+
+
+    CCTP endpoints enable advanced capabilities such as fetching attestations
+    for faster-than-finality burn events, verifying public keys across versions,
+    accessing transaction details, querying Fast Transfer allowances and fees,
+    and initiating re-attestation processes.
+servers:
+  - url: https://iris-api-sandbox.circle.com
+  - url: https://iris-api.circle.com
+security: []
+tags:
+  - name: CCTP
+    description: Cross-Chain Transfer Protocol endpoints
+  - name: CCTP V1 (Legacy)
+    description: Legacy Cross-Chain Transfer Protocol endpoints
+paths:
+  /v2/fastBurn/USDC/allowance:
+    get:
+      tags:
+        - CCTP
+      summary: Get USDC Fast Transfer allowance
+      description: Retrieves the available USDC Fast Transfer allowance remaining.
+      operationId: getFastBurnUsdcAllowance
+      responses:
+        '200':
+          description: Successfully retrieved the available USDC Fast Burn allowance.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/USDCFastBurnAllowanceResponseV2'
+              examples:
+                response:
+                  value:
+                    allowance: 123999.999999
+                    lastUpdated: '2025-01-23T10:00:00Z'
+components:
+  schemas:
+    USDCFastBurnAllowanceResponseV2:
+      title: GetFastBurnUSDCAllowanceResponse
+      type: object
+      properties:
+        allowance:
+          type: number
+          description: >-
+            The current USDC Fast Burn allowance remaining, in full units of
+            USDC up to 6 decimals.
+          example: 123999.999999
+        lastUpdated:
+          $ref: '#/components/schemas/UtcTimestamp'
+    UtcTimestamp:
+      type: string
+      format: date-time
+      description: >
+        A UTC timestamp in ISO 8601 format, representing the date and time of an
+        event.
+      example: '2025-01-23T10:00:00Z'
+
+````

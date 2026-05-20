@@ -9,7 +9,7 @@ A browser-based prototype for bridging native USDC with Circle CCTP V2 across St
 - EVM testnet routes for Base, Ethereum Sepolia, Arbitrum Sepolia, OP Sepolia, Avalanche Fuji, and Polygon Amoy.
 - Circle CCTP V2 fee quote, Fast Transfer allowance, message polling, attestation handling, and manual receive fallback.
 - Stellar `CctpForwarder` handling for inbound Stellar routes.
-- WalletConnect-first wallet flow for local testing.
+- Browser extension and WalletConnect wallet flows.
 
 ## Local Testing
 
@@ -25,7 +25,7 @@ Then open:
 http://localhost:4173/
 ```
 
-For local testing, use WalletConnect first. Desktop extension injection can be unreliable on local origins, so extension testing is best done from an HTTPS deployment.
+For deployed HTTPS testing, use Freighter extension for Stellar source approvals and browser EVM extensions such as MetaMask/Rabby/Coinbase for desktop EVM signing. WalletConnect remains the mobile-wallet fallback.
 
 ## Deployment
 

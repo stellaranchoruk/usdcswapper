@@ -14,7 +14,7 @@ let viem = null;
 
 async function loadStellarSdk() {
   if (StellarSdk) return StellarSdk;
-  const module = await import("https://esm.sh/@stellar/stellar-sdk@13.2.0?bundle");
+  const module = await import("https://esm.sh/@stellar/stellar-sdk@14.1.1?bundle");
   StellarSdk = module.default ?? module;
   return StellarSdk;
 }
@@ -1432,7 +1432,9 @@ function openConnect(target) {
   state.connectTarget = target;
   state.connectKind = target === "source" ? sourceChain().kind : destChain().kind;
   el.connectTitle.textContent = state.connectKind === "stellar" ? "Connect Stellar wallet" : "Connect EVM wallet";
-  el.connectSubtitle.textContent = "WalletConnect is recommended for local testing.";
+  el.connectSubtitle.textContent = state.connectKind === "stellar"
+    ? "Use Freighter extension for Stellar source signing. WalletConnect support depends on the mobile wallet."
+    : "Use a browser extension on desktop, or WalletConnect for mobile wallets.";
   el.qrArea.classList.remove("open");
   el.manualArea.classList.remove("open");
   renderConnectOptions();
@@ -1443,12 +1445,13 @@ function renderConnectOptions() {
   const kind = state.connectKind;
   const options = [];
   if (kind === "stellar") {
-    options.push(["WalletConnect", "Freighter or another Soroban-capable wallet.", connectStellarWalletConnect, true]);
-    options.push(["Freighter extension", "Desktop extension when injection is available.", connectFreighter, false]);
+    options.push(["Freighter extension", "Best for Soroban approvals and burns.", connectFreighter, true]);
+    options.push(["WalletConnect", "Mobile wallets; must support Soroban transaction XDR.", connectStellarWalletConnect, false]);
     options.push(["Manual address", "Autofill only. Cannot sign transactions.", () => showManualAddress("Stellar address", "G... / M... / C..."), false]);
   } else {
-    options.push(["WalletConnect", "MetaMask and compatible mobile wallets.", connectEvmWalletConnect, true]);
-    options.push(["Browser extension", "Desktop extension when injection is available.", connectEvmInjected, false]);
+    const hasInjectedProvider = !!getInjectedProvider();
+    options.push(["Browser extension", hasInjectedProvider ? "MetaMask, Rabby, Coinbase Wallet, or another injected wallet." : "Desktop extension. We will wait for provider injection.", connectEvmInjected, hasInjectedProvider]);
+    options.push(["WalletConnect", "MetaMask and compatible mobile wallets.", connectEvmWalletConnect, !hasInjectedProvider]);
     options.push(["Manual address", "Autofill only. Cannot sign transactions.", () => showManualAddress("EVM address", "0x..."), false]);
   }
   el.connectOptions.innerHTML = "";
@@ -1512,17 +1515,27 @@ async function connectFreighter() {
 async function connectEvmInjected() {
   const provider = await waitForInjectedProvider();
   if (!provider) {
-    throw new Error("No browser extension wallet was detected. Open this page in Chrome with MetaMask, Rabby, or Coinbase Wallet installed and unlocked, allow the extension on localhost, then hard refresh. WalletConnect is the fallback.");
+    throw new Error("No browser extension wallet was detected. Open this HTTPS page in Chrome with MetaMask, Rabby, or Coinbase Wallet installed and unlocked, make sure the extension has site access, then hard refresh. WalletConnect is the fallback.");
   }
-  const accounts = await provider.request({ method: "eth_requestAccounts" });
-  if (!accounts?.[0]) throw new Error("No EVM account returned.");
-  state.evm.provider = provider;
-  state.evm.address = accounts[0];
-  state.evm.mode = "injected";
-  state.evm.chainId = Number.parseInt(await provider.request({ method: "eth_chainId" }), 16);
-  autoFillRecipient();
-  closeModals();
-  toast("ok", "EVM connected", short(state.evm.address));
+  showSigning("Action required in EVM extension", "MetaMask/Rabby/Coinbase should open a connection prompt. If it is hidden, click the extension icon in Chrome.", null, null);
+  try {
+    const accounts = await withTimeout(
+      provider.request({ method: "eth_requestAccounts" }),
+      45000,
+      "No response from the EVM extension. Click the wallet extension icon in Chrome, approve the connection, then try again."
+    );
+    if (!accounts?.[0]) throw new Error("No EVM account returned.");
+    state.evm.provider = provider;
+    state.evm.address = accounts[0];
+    state.evm.mode = "injected";
+    state.evm.chainId = Number.parseInt(await provider.request({ method: "eth_chainId" }), 16);
+    autoFillRecipient();
+    closeModals();
+    toast("ok", "EVM connected", short(state.evm.address));
+  } catch (error) {
+    closeModals();
+    throw error;
+  }
 }
 
 async function connectStellarWalletConnect() {
@@ -1701,8 +1714,9 @@ async function signStellarXdr(xdr) {
     showSigning("Action required in Freighter", "Approve the Stellar transaction in Freighter.", null, null);
     try {
       const result = await api.signTransaction(xdr, {
+        network: state.env === "mainnet" ? "PUBLIC" : "TESTNET",
         networkPassphrase: env().stellar.networkPassphrase,
-        accountToSign: state.stellar.address,
+        address: state.stellar.address,
       });
       closeModals();
       return extractSignedXdr(result);
@@ -2141,11 +2155,23 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function withTimeout(promise, ms, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 function errorMessage(error) {
   return error?.shortMessage || error?.message || String(error);
 }
 
 function extractSignedXdr(result) {
+  if (result?.error) {
+    const error = result.error;
+    throw new Error(error?.message || errorMessage(error));
+  }
   if (typeof result === "string") return result;
   const candidates = [
     result?.signedTxXdr,
@@ -2171,7 +2197,7 @@ function extractSignedXdr(result) {
 function normalizeStellarWalletError(error) {
   const message = errorMessage(error);
   if (/bad union switch/i.test(message)) {
-    return new Error("The connected Stellar wallet could not parse this Soroban transaction XDR. CCTP approval is a Soroban contract call, so use a Soroban-capable Stellar wallet such as Freighter for signing. Some LOBSTR WalletConnect flows only support classic Stellar transaction XDRs.");
+    return new Error("Stellar XDR parsing failed. Hard refresh the live site, make sure Freighter is updated, and use Freighter extension for Stellar approvals and burns. Some WalletConnect mobile wallets still fail on Soroban transaction XDR.");
   }
   return error instanceof Error ? error : new Error(message);
 }

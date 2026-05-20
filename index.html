@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stellar CCTP Bridge</title>
+  <link rel="stylesheet" href="./src/styles.css">
+</head>
+<body>
+  <div class="toast-wrap" id="toastWrap"></div>
+
+  <header class="shell topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">C</div>
+      <div>
+        <h1>Stellar CCTP Bridge</h1>
+        <p>USDC burn, attest, mint, and recover flows for Stellar CCTP V2.</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span class="status-pill" id="networkBadge">Testnet preview</span>
+      <button class="icon-btn" id="resetBtn" type="button" title="Reset transfer" aria-label="Reset transfer">
+        <span aria-hidden="true">R</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="shell app-grid">
+    <section class="workspace">
+      <div class="section-title">
+        <div>
+          <h2>Bridge USDC</h2>
+          <p id="routeSubtitle">Choose a route and quote the transfer before signing.</p>
+        </div>
+        <div class="env-switch" role="group" aria-label="Environment">
+          <button class="seg active" id="testnetBtn" type="button">Testnet</button>
+          <button class="seg" id="mainnetBtn" type="button">Mainnet</button>
+        </div>
+      </div>
+
+      <div class="route-board">
+        <label class="field">
+          <span>Source chain</span>
+          <select id="sourceChain"></select>
+        </label>
+        <button class="swap-btn" id="swapRouteBtn" type="button" title="Swap route" aria-label="Swap source and destination">-></button>
+        <label class="field">
+          <span>Destination chain</span>
+          <select id="destChain"></select>
+        </label>
+      </div>
+
+      <div class="form-grid">
+        <label class="field amount-field">
+          <span>You send</span>
+          <input id="amountInput" inputmode="decimal" autocomplete="off" placeholder="0.00">
+        </label>
+        <label class="field">
+          <span>Receiving address</span>
+          <input id="recipientInput" class="mono" autocomplete="off" placeholder="0x... or G...">
+        </label>
+      </div>
+
+      <div class="wallet-grid">
+        <button class="wallet-btn" id="sourceWalletBtn" type="button">
+          <span>
+            <strong id="sourceWalletTitle">Connect source wallet</strong>
+            <small id="sourceWalletMeta">Required</small>
+          </span>
+          <span aria-hidden="true">-></span>
+        </button>
+        <button class="wallet-btn" id="destWalletBtn" type="button">
+          <span>
+            <strong id="destWalletTitle">Connect receiver wallet</strong>
+            <small id="destWalletMeta">Optional autofill</small>
+          </span>
+          <span aria-hidden="true">-></span>
+        </button>
+      </div>
+
+      <div class="toolbar">
+        <button class="small-btn" id="useConnectedRecipientBtn" type="button" disabled>Use connected recipient</button>
+        <button class="small-btn primary" id="refreshQuoteBtn" type="button">Refresh quote</button>
+        <button class="small-btn" id="refreshAllowanceBtn" type="button">Check fast allowance</button>
+      </div>
+
+      <div class="transfer-options">
+        <button class="speed-card active" id="fastBtn" type="button">
+          <strong>Fast</strong>
+          <span id="fastMeta">Confirmed finality, fee applies.</span>
+        </button>
+        <button class="speed-card" id="standardBtn" type="button">
+          <strong>Standard</strong>
+          <span>Hard finality, usually no protocol fee.</span>
+        </button>
+        <label class="toggle-line" id="forwardingToggleWrap">
+          <input id="forwardingToggle" type="checkbox" checked>
+          <span>Use Circle auto-delivery when destination supports it</span>
+        </label>
+        <label class="buffer-line">
+          <span>maxFee buffer</span>
+          <input id="feeBufferInput" inputmode="numeric" value="20">
+          <span>%</span>
+        </label>
+      </div>
+
+      <div class="notice" id="routeNotice">
+        <strong id="routeNoticeTitle">Route ready</strong>
+        <span id="routeNoticeText">Quote the transfer to continue.</span>
+      </div>
+
+      <section class="quote-panel" aria-labelledby="quoteHeading">
+        <div class="quote-head">
+          <h3 id="quoteHeading">Quote</h3>
+          <span id="quoteStatus">Not quoted</span>
+        </div>
+        <div class="quote-grid">
+          <div class="metric">
+            <span>You burn</span>
+            <strong id="burnAmountOut">0.00 USDC</strong>
+          </div>
+          <div class="metric receive">
+            <span>Estimated receive</span>
+            <strong id="receiveAmountOut">0.00 USDC</strong>
+          </div>
+          <div class="metric">
+            <span>Circle fee estimate</span>
+            <strong id="feeEstimateOut">0.00 USDC</strong>
+          </div>
+          <div class="metric">
+            <span>maxFee parameter</span>
+            <strong id="maxFeeOut">0.00 USDC</strong>
+          </div>
+          <div class="metric">
+            <span>Forwarding fee</span>
+            <strong id="forwardFeeOut">-</strong>
+          </div>
+          <div class="metric">
+            <span>Protocol fee</span>
+            <strong id="protocolFeeOut">-</strong>
+          </div>
+        </div>
+        <p id="quoteNote" class="quiet">Fees are fetched from Circle before signing.</p>
+      </section>
+
+      <button class="main-action" id="mainActionBtn" type="button">Connect source wallet</button>
+      <p class="helper" id="mainHelper">Connect your sending wallet to begin.</p>
+
+      <section class="timeline-panel" aria-labelledby="progressHeading">
+        <h3 id="progressHeading">Progress</h3>
+        <div id="timeline"></div>
+      </section>
+
+      <section class="success-panel" id="successPanel">
+        <div>
+          <h3>Bridge complete</h3>
+          <p id="successText">The transfer is complete.</p>
+        </div>
+        <div class="success-grid">
+          <div><span>Approve</span><strong id="successApproveTx">-</strong></div>
+          <div><span>Burn</span><strong id="successBurnTx">-</strong></div>
+          <div><span>Receive / forward</span><strong id="successReceiveTx">-</strong></div>
+        </div>
+        <button class="small-btn" id="copySummaryBtn" type="button">Copy summary</button>
+      </section>
+    </section>
+
+    <aside class="side-stack">
+      <section class="panel">
+        <h3>Network</h3>
+        <div class="kv"><span>Environment</span><strong id="envOut">testnet</strong></div>
+        <div class="kv"><span>Mainnet armed</span><strong id="mainnetArmedOut">false</strong></div>
+        <button class="small-btn warn full" id="armMainnetBtn" type="button">Arm mainnet actions</button>
+        <p class="quiet danger-text" id="mainnetWarning">Mainnet actions use real USDC. Keep this locked until a final dry run is done.</p>
+      </section>
+
+      <section class="panel">
+        <h3>Connections</h3>
+        <div class="kv"><span>Stellar</span><strong class="mono" id="stellarConnOut">Not connected</strong></div>
+        <div class="kv"><span>EVM</span><strong class="mono" id="evmConnOut">Not connected</strong></div>
+        <div class="kv"><span>Vault / multisig</span><strong class="mono" id="vaultModeOut">Unknown</strong></div>
+      </section>
+
+      <section class="panel">
+        <h3>Route model</h3>
+        <div class="kv"><span>Source domain</span><strong id="sourceDomainOut">27</strong></div>
+        <div class="kv"><span>Destination domain</span><strong id="destDomainOut">6</strong></div>
+        <div class="kv"><span>Delivery</span><strong id="deliveryOut">Manual receive</strong></div>
+        <div class="kv"><span>Fast allowance</span><strong class="mono" id="allowanceOut">Not checked</strong></div>
+        <p class="quiet" id="routeModelNote"></p>
+      </section>
+
+      <section class="panel">
+        <h3>Contracts</h3>
+        <div class="kv"><span>TokenMessenger</span><strong class="mono" id="tokenMessengerOut">-</strong></div>
+        <div class="kv"><span>MessageTransmitter</span><strong class="mono" id="messageTransmitterOut">-</strong></div>
+        <div class="kv"><span>CctpForwarder</span><strong class="mono" id="forwarderOut">-</strong></div>
+        <div class="kv"><span>USDC source</span><strong class="mono" id="usdcOut">-</strong></div>
+      </section>
+
+      <section class="panel advanced-panel">
+        <div class="panel-head">
+          <h3>Advanced</h3>
+          <button class="small-btn" id="advancedToggle" type="button">Show</button>
+        </div>
+        <div class="advanced" id="advancedArea">
+          <label class="field compact">
+            <span>Burn transaction hash</span>
+            <input id="burnHashInput" class="mono" placeholder="0x... or Stellar tx hash">
+          </label>
+          <label class="field compact">
+            <span>Nonce for re-attestation</span>
+            <input id="nonceInput" class="mono" placeholder="Nonce from Iris">
+          </label>
+          <div class="button-grid">
+            <button class="small-btn" id="fetchMessageBtn" type="button">Fetch message</button>
+            <button class="small-btn" id="resumePollingBtn" type="button">Resume polling</button>
+            <button class="small-btn" id="verifyAttestationBtn" type="button">Verify attestation</button>
+            <button class="small-btn" id="reattestBtn" type="button">Re-attest</button>
+          </div>
+          <label class="textarea-field">
+            <span>Message</span>
+            <textarea id="messageText" spellcheck="false"></textarea>
+          </label>
+          <label class="textarea-field">
+            <span>Attestation</span>
+            <textarea id="attestationText" spellcheck="false"></textarea>
+          </label>
+          <div class="button-grid">
+            <button class="small-btn" id="useAttestationBtn" type="button">Use pasted attestation</button>
+            <button class="small-btn" id="manualReceiveBtn" type="button">Retry manual receive</button>
+          </div>
+          <div class="log-box mono" id="logBox" aria-live="polite"></div>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <div class="backdrop" id="backdrop"></div>
+
+  <section class="modal" id="connectModal" role="dialog" aria-modal="true" aria-labelledby="connectTitle">
+    <div class="modal-inner">
+      <div class="modal-head">
+        <div>
+          <h3 id="connectTitle">Connect wallet</h3>
+          <p id="connectSubtitle">Choose a wallet for this route.</p>
+        </div>
+        <button class="icon-btn" data-close type="button" aria-label="Close">x</button>
+      </div>
+      <div class="connect-options" id="connectOptions"></div>
+      <div class="qr-area" id="qrArea">
+        <canvas id="qrCanvas" width="256" height="256"></canvas>
+        <div class="qr-fallback" id="qrFallback"></div>
+        <div class="toolbar center">
+          <button class="small-btn primary" id="openMobileWalletBtn" type="button">Open wallet</button>
+          <button class="small-btn" id="copyWcBtn" type="button">Copy link</button>
+        </div>
+        <p class="quiet" id="qrStatus">Scan or open this WalletConnect request.</p>
+      </div>
+      <label class="field compact manual-area" id="manualArea">
+        <span id="manualLabel">Manual address</span>
+        <input id="manualAddressInput" class="mono" placeholder="Address">
+        <button class="small-btn" id="useManualAddressBtn" type="button">Use address</button>
+      </label>
+    </div>
+  </section>
+
+  <section class="modal" id="signingModal" role="dialog" aria-modal="true" aria-labelledby="signingTitle">
+    <div class="modal-inner small-modal">
+      <div class="modal-head">
+        <div>
+          <h3 id="signingTitle">Action required</h3>
+          <p id="signingText">Approve the request in your wallet.</p>
+        </div>
+        <button class="icon-btn" data-close type="button" aria-label="Close">x</button>
+      </div>
+      <div class="status-box">
+        <strong id="signingStatus">Waiting for signature...</strong>
+        <span id="signingSubtext">Do not refresh the page while the wallet request is open.</span>
+      </div>
+      <div class="toolbar">
+        <button class="small-btn primary" id="openSigningWalletBtn" type="button">Open wallet</button>
+        <button class="small-btn" id="copySigningLinkBtn" type="button">Copy WC link</button>
+      </div>
+    </div>
+  </section>
+
+  <script src="./src/app.js"></script>
+</body>
+</html>

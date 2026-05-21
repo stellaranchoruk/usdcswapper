@@ -1679,11 +1679,8 @@ async function renderQr(uri) {
 function openStellarPairing(uri) {
   if (isMobile()) {
     location.href = `lobstr://wc?uri=${encodeURIComponent(uri)}`;
-    setTimeout(() => {
-      if (!document.hidden) location.href = `freighter://wc?uri=${encodeURIComponent(uri)}`;
-    }, 1100);
   } else {
-    el.qrStatus.textContent = "Scan the QR with LOBSTR or Freighter mobile.";
+    el.qrStatus.textContent = "Open LOBSTR, scan the QR, or copy the WalletConnect link for another Stellar wallet.";
   }
 }
 
@@ -1697,13 +1694,27 @@ function openEvmPairing(uri) {
 
 function openStellarRequestWallet() {
   if (isMobile()) {
-    location.href = "lobstr://";
-    setTimeout(() => {
-      if (!document.hidden) location.href = "freighter://";
-    }, 900);
+    location.href = stellarRequestWalletUrl();
   } else {
     el.signingStatus.textContent = "Open your connected Stellar wallet app and approve the pending request.";
   }
+}
+
+function stellarRequestWalletUrl() {
+  const metadata = state.stellar.session?.peer?.metadata ?? {};
+  const nativeRedirect = metadata.redirect?.native;
+  if (nativeRedirect) return normalizeNativeWalletUrl(nativeRedirect);
+  const peerText = [metadata.name, metadata.description, metadata.url].join(" ").toLowerCase();
+  if (peerText.includes("freighter")) return "freighter://";
+  return "lobstr://";
+}
+
+function normalizeNativeWalletUrl(url) {
+  const text = String(url || "").trim();
+  if (!text) return "lobstr://";
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return text;
+  if (/^[a-z][a-z0-9+.-]*:$/i.test(text)) return `${text}//`;
+  return "lobstr://";
 }
 
 function openEvmRequestWallet() {

@@ -387,6 +387,9 @@ const state = {
   connectTarget: "source",
   connectKind: "stellar",
   wcUri: "",
+  actionRunId: 0,
+  signingRequestId: 0,
+  signingRequestCancelled: false,
   stellar: {
     address: "",
     mode: "none",
@@ -1384,47 +1387,59 @@ function usePastedAttestation() {
 async function runMain() {
   const action = currentAction();
   if (!action.fn) return;
+  const runId = ++state.actionRunId;
   state.busy = true;
   updateUi();
   try {
     await action.fn();
   } catch (error) {
+    if (runId !== state.actionRunId) return;
     closeModals();
     const message = errorMessage(error);
     state.flow.statusText = message;
-    toast("err", "Action failed", message, 8000);
+    if (!isCancelledWalletRequest(error)) toast("err", "Action failed", message, 8000);
     log("Action failed", message);
   } finally {
-    state.busy = false;
-    updateUi();
+    if (runId === state.actionRunId) {
+      state.busy = false;
+      updateUi();
+    }
   }
 }
 
 async function runAdvanced(fn) {
+  const runId = ++state.actionRunId;
   state.busy = true;
   updateUi();
   try {
     await fn();
   } catch (error) {
-    toast("err", "Advanced action failed", errorMessage(error), 8000);
+    if (runId !== state.actionRunId) return;
+    if (!isCancelledWalletRequest(error)) toast("err", "Advanced action failed", errorMessage(error), 8000);
   } finally {
-    state.busy = false;
-    updateUi();
+    if (runId === state.actionRunId) {
+      state.busy = false;
+      updateUi();
+    }
   }
 }
 
 async function runWalletAction(fn) {
+  const runId = ++state.actionRunId;
   state.busy = true;
   updateUi();
   try {
     await fn();
   } catch (error) {
+    if (runId !== state.actionRunId) return;
     const message = errorMessage(error);
-    toast("err", "Wallet connection failed", message, 10000);
+    if (!isCancelledWalletRequest(error)) toast("err", "Wallet connection failed", message, 10000);
     log("Wallet connection failed", message);
   } finally {
-    state.busy = false;
-    updateUi();
+    if (runId === state.actionRunId) {
+      state.busy = false;
+      updateUi();
+    }
   }
 }
 
@@ -1445,21 +1460,21 @@ function renderConnectOptions() {
   const kind = state.connectKind;
   const options = [];
   if (kind === "stellar") {
-    options.push(["Freighter extension", "Best for Soroban approvals and burns.", connectFreighter, true]);
-    options.push(["WalletConnect", "Mobile wallets; must support Soroban transaction XDR.", connectStellarWalletConnect, false]);
-    options.push(["Manual address", "Autofill only. Cannot sign transactions.", () => showManualAddress("Stellar address", "G... / M... / C..."), false]);
+    options.push(["Freighter extension", "Best for Soroban approvals and burns.", connectFreighter]);
+    options.push(["WalletConnect", "Mobile wallets; must support Soroban transaction XDR.", connectStellarWalletConnect]);
+    options.push(["Manual address", "Autofill only. Cannot sign transactions.", () => showManualAddress("Stellar address", "G... / M... / C...")]);
   } else {
     const hasInjectedProvider = !!getInjectedProvider();
-    options.push(["Browser extension", hasInjectedProvider ? "MetaMask, Rabby, Coinbase Wallet, or another injected wallet." : "Desktop extension. We will wait for provider injection.", connectEvmInjected, hasInjectedProvider]);
-    options.push(["WalletConnect", "MetaMask and compatible mobile wallets.", connectEvmWalletConnect, !hasInjectedProvider]);
-    options.push(["Manual address", "Autofill only. Cannot sign transactions.", () => showManualAddress("EVM address", "0x..."), false]);
+    options.push(["Browser extension", hasInjectedProvider ? "MetaMask, Rabby, Coinbase Wallet, or another injected wallet." : "Desktop extension. We will wait for provider injection.", connectEvmInjected]);
+    options.push(["WalletConnect", "MetaMask and compatible mobile wallets.", connectEvmWalletConnect]);
+    options.push(["Manual address", "Autofill only. Cannot sign transactions.", () => showManualAddress("EVM address", "0x...")]);
   }
   el.connectOptions.innerHTML = "";
-  for (const [title, subtitle, fn, recommended] of options) {
+  for (const [title, subtitle, fn] of options) {
     const button = document.createElement("button");
-    button.className = `connect-option${recommended ? " recommended" : ""}`;
+    button.className = "connect-option";
     button.type = "button";
-    button.innerHTML = `<strong>${esc(title)}${recommended ? '<em>Recommended</em>' : ""}</strong><span>${esc(subtitle)}</span>`;
+    button.innerHTML = `<strong>${esc(title)}</strong><span>${esc(subtitle)}</span>`;
     button.onclick = () => runWalletAction(fn);
     el.connectOptions.appendChild(button);
   }
@@ -1517,13 +1532,14 @@ async function connectEvmInjected() {
   if (!provider) {
     throw new Error("No browser extension wallet was detected. Open this HTTPS page in Chrome with MetaMask, Rabby, or Coinbase Wallet installed and unlocked, make sure the extension has site access, then hard refresh. WalletConnect is the fallback.");
   }
-  showSigning("Action required in EVM extension", "MetaMask/Rabby/Coinbase should open a connection prompt. If it is hidden, click the extension icon in Chrome.", null, null);
+  const signingId = showSigning("Action required in EVM extension", "MetaMask/Rabby/Coinbase should open a connection prompt. If it is hidden, click the extension icon in Chrome.", null, null);
   try {
     const accounts = await withTimeout(
       provider.request({ method: "eth_requestAccounts" }),
       45000,
       "No response from the EVM extension. Click the wallet extension icon in Chrome, approve the connection, then try again."
     );
+    assertSigningRequestActive(signingId);
     if (!accounts?.[0]) throw new Error("No EVM account returned.");
     state.evm.provider = provider;
     state.evm.address = accounts[0];
@@ -1553,7 +1569,7 @@ async function connectStellarWalletConnect() {
   });
   state.stellar.wcUri = uri || "";
   state.wcUri = uri || "";
-  await showWalletConnect(uri, () => openStellarWallet(uri));
+  await showWalletConnect(uri, () => openStellarPairing(uri));
   state.stellar.session = await approval();
   const accounts = state.stellar.session.namespaces?.stellar?.accounts ?? [];
   const first = accounts.find((account) => account.startsWith(chain)) ?? accounts[0] ?? "";
@@ -1588,7 +1604,7 @@ async function connectEvmWalletConnect() {
   });
   state.evm.wcUri = uri || "";
   state.wcUri = uri || "";
-  await showWalletConnect(uri, () => openEvmWallet(uri));
+  await showWalletConnect(uri, () => openEvmPairing(uri));
   state.evm.session = await approval();
   const accounts = state.evm.session.namespaces?.eip155?.accounts ?? [];
   const first = accounts.find((account) => account.startsWith(caip)) ?? accounts[0] ?? "";
@@ -1660,7 +1676,7 @@ async function renderQr(uri) {
   el.qrFallback.textContent = uri;
 }
 
-function openStellarWallet(uri) {
+function openStellarPairing(uri) {
   if (isMobile()) {
     location.href = `lobstr://wc?uri=${encodeURIComponent(uri)}`;
     setTimeout(() => {
@@ -1671,11 +1687,30 @@ function openStellarWallet(uri) {
   }
 }
 
-function openEvmWallet(uri) {
+function openEvmPairing(uri) {
   if (isMobile()) {
     location.href = `https://metamask.app.link/wc?uri=${encodeURIComponent(uri)}`;
   } else {
     el.qrStatus.textContent = "Scan the QR with MetaMask or another WalletConnect wallet.";
+  }
+}
+
+function openStellarRequestWallet() {
+  if (isMobile()) {
+    location.href = "lobstr://";
+    setTimeout(() => {
+      if (!document.hidden) location.href = "freighter://";
+    }, 900);
+  } else {
+    el.signingStatus.textContent = "Open your connected Stellar wallet app and approve the pending request.";
+  }
+}
+
+function openEvmRequestWallet() {
+  if (isMobile()) {
+    location.href = "metamask://";
+  } else {
+    el.signingStatus.textContent = "Open your connected EVM wallet app and approve the pending request.";
   }
 }
 
@@ -1711,13 +1746,14 @@ async function signStellarXdr(xdr) {
   if (state.stellar.mode === "freighter") {
     const module = await import("https://esm.sh/@stellar/freighter-api@5.0.0");
     const api = module.default ?? module;
-    showSigning("Action required in Freighter", "Approve the Stellar transaction in Freighter.", null, null);
+    const signingId = showSigning("Action required in Freighter", "Approve the Stellar transaction in Freighter.", null, null);
     try {
       const result = await api.signTransaction(xdr, {
         network: state.env === "mainnet" ? "PUBLIC" : "TESTNET",
         networkPassphrase: env().stellar.networkPassphrase,
         address: state.stellar.address,
       });
+      assertSigningRequestActive(signingId);
       closeModals();
       return extractSignedXdr(result);
     } catch (error) {
@@ -1727,14 +1763,15 @@ async function signStellarXdr(xdr) {
   }
   if (state.stellar.mode === "wc") {
     const chain = state.env === "mainnet" ? "stellar:pubnet" : "stellar:testnet";
-    showSigning("Action required in mobile wallet", "Approve the Stellar WalletConnect request.", () => openStellarWallet(state.stellar.wcUri), state.stellar.wcUri);
-    setTimeout(() => openStellarWallet(state.stellar.wcUri), 400);
+    const signingId = showSigning("Action required in mobile wallet", "Approve the pending request in your connected Stellar wallet.", openStellarRequestWallet, null);
+    setTimeout(openStellarRequestWallet, 400);
     try {
       const result = await state.stellar.wc.request({
         topic: state.stellar.session.topic,
         chainId: chain,
         request: { jsonrpc: "2.0", method: "stellar_signXDR", params: { xdr } },
       });
+      assertSigningRequestActive(signingId);
       closeModals();
       return extractSignedXdr(result);
     } catch (error) {
@@ -1827,14 +1864,15 @@ async function switchEvm(chain) {
 async function evmSend(tx) {
   if (state.evm.mode === "manual") throw new Error("Manual EVM address cannot sign.");
   if (state.evm.mode === "wc") {
-    showSigning("Action required in EVM wallet", "Approve the WalletConnect transaction.", () => openEvmWallet(state.evm.wcUri), state.evm.wcUri);
-    setTimeout(() => openEvmWallet(state.evm.wcUri), 500);
+    const signingId = showSigning("Action required in EVM wallet", "Approve the pending WalletConnect transaction in your connected EVM wallet.", openEvmRequestWallet, null);
+    setTimeout(openEvmRequestWallet, 500);
     try {
       const result = await state.evm.wc.request({
         topic: state.evm.session.topic,
         chainId: `eip155:${state.evm.chainId}`,
         request: { method: "eth_sendTransaction", params: [tx] },
       });
+      assertSigningRequestActive(signingId);
       closeModals();
       return result;
     } catch (error) {
@@ -1844,9 +1882,10 @@ async function evmSend(tx) {
   }
   const provider = state.evm.provider ?? getInjectedProvider();
   if (!provider) throw new Error("No EVM provider connected.");
-  showSigning("Action required in EVM wallet", "Approve the browser wallet transaction.", null, null);
+  const signingId = showSigning("Action required in EVM wallet", "Approve the browser wallet transaction.", null, null);
   try {
     const result = await provider.request({ method: "eth_sendTransaction", params: [tx] });
+    assertSigningRequestActive(signingId);
     closeModals();
     return result;
   } catch (error) {
@@ -1926,10 +1965,12 @@ function providerLooksLike(provider, info, name) {
 }
 
 function showSigning(title, text, openFn, wcLink) {
+  state.signingRequestId += 1;
+  state.signingRequestCancelled = false;
   el.signingTitle.textContent = title;
   el.signingText.textContent = text;
   el.signingStatus.textContent = "Waiting for signature...";
-  el.signingSubtext.textContent = "Do not refresh the page while the wallet request is open.";
+  el.signingSubtext.textContent = "You can close this panel to cancel and retry if the wallet does not respond.";
   el.openSigningWalletBtn.classList.toggle("hidden", !openFn);
   el.copySigningLinkBtn.classList.toggle("hidden", !wcLink);
   el.openSigningWalletBtn.onclick = openFn || (() => {});
@@ -1938,6 +1979,7 @@ function showSigning(title, text, openFn, wcLink) {
     toast("ok", "Copied", "WalletConnect link copied.");
   };
   showModal("signingModal");
+  return state.signingRequestId;
 }
 
 function showModal(id) {
@@ -1948,6 +1990,20 @@ function showModal(id) {
 function closeModals() {
   el.backdrop.classList.remove("open");
   document.querySelectorAll(".modal.open").forEach((modal) => modal.classList.remove("open"));
+}
+
+function handleUserModalClose() {
+  if (el.signingModal.classList.contains("open") && state.busy) {
+    state.signingRequestCancelled = true;
+    state.actionRunId += 1;
+    state.busy = false;
+    state.flow.statusText = "Wallet request closed. You can retry the action now.";
+    closeModals();
+    updateUi();
+    toast("info", "Wallet request closed", "Press the action button again when you are ready to retry.", 5000);
+    return;
+  }
+  closeModals();
 }
 
 function setEnv(nextEnv) {
@@ -2163,6 +2219,18 @@ function withTimeout(promise, ms, message) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+function assertSigningRequestActive(signingId) {
+  if (signingId !== state.signingRequestId || state.signingRequestCancelled) {
+    const error = new Error("Wallet request was closed. Press the action button to try again.");
+    error.cancelled = true;
+    throw error;
+  }
+}
+
+function isCancelledWalletRequest(error) {
+  return !!error?.cancelled || /wallet request (was )?(closed|cancelled|canceled)/i.test(errorMessage(error));
+}
+
 function errorMessage(error) {
   return error?.shortMessage || error?.message || String(error);
 }
@@ -2290,9 +2358,9 @@ function bindEvents() {
   el.useAttestationBtn.onclick = usePastedAttestation;
   el.manualReceiveBtn.onclick = () => runAdvanced(destIsStellar() ? receiveOnStellar : receiveOnEvm);
   el.useManualAddressBtn.onclick = useManualAddress;
-  el.backdrop.onclick = closeModals;
+  el.backdrop.onclick = handleUserModalClose;
   document.querySelectorAll("[data-close]").forEach((button) => {
-    button.onclick = closeModals;
+    button.onclick = handleUserModalClose;
   });
 }
 

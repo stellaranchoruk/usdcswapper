@@ -807,11 +807,6 @@ textarea {
   text-align: left;
 }
 
-.connect-option.recommended {
-  border-color: rgba(37, 99, 235, 0.4);
-  background: #eff6ff;
-}
-
 .connect-option strong,
 .connect-option span {
   display: block;

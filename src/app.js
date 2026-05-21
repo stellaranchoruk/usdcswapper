@@ -282,6 +282,7 @@ const ids = [
   "sourceChain",
   "destChain",
   "swapRouteBtn",
+  "sourceBalanceOut",
   "amountInput",
   "recipientInput",
   "sourceWalletBtn",
@@ -412,6 +413,8 @@ const state = {
   flow: blankFlow(),
   pollTimer: null,
   pollCount: 0,
+  quoteTimer: null,
+  quoteRequestId: 0,
 };
 
 const announcedEvmProviders = [];
@@ -560,8 +563,12 @@ function circleForwardingAvailable() {
   return sourceIsEvm() && destIsEvm() && !!destChain().forwardingDestination;
 }
 
+function autoDeliveryAvailable() {
+  return circleForwardingAvailable() && canUseFast();
+}
+
 function usesCircleForwarding() {
-  return circleForwardingAvailable() && state.useCircleForwarding;
+  return autoDeliveryAvailable() && state.speed === "fast" && state.useCircleForwarding;
 }
 
 function needsFeeQuote() {
@@ -581,6 +588,35 @@ function fastAllowanceOk() {
 
 function mainnetBlocked() {
   return state.env === "mainnet" && !state.mainnetArmed;
+}
+
+function routeMode() {
+  if (usesCircleForwarding()) return "delivery";
+  return state.speed;
+}
+
+function setRouteMode(mode) {
+  if (mode === "delivery") {
+    if (!autoDeliveryAvailable()) {
+      toast("info", "Auto-delivery unavailable", "This route does not currently support Circle auto-delivery.");
+      return;
+    }
+    state.speed = "fast";
+    state.useCircleForwarding = true;
+  } else if (mode === "fast") {
+    if (!canUseFast()) {
+      toast("info", "Fast unavailable", "This source chain is Standard-only.");
+      return;
+    }
+    state.speed = "fast";
+    state.useCircleForwarding = false;
+  } else {
+    state.speed = "standard";
+    state.useCircleForwarding = false;
+  }
+  stopPolling();
+  state.flow = blankFlow();
+  scheduleRouteRefresh();
 }
 
 function currentAction() {
@@ -811,7 +847,9 @@ function updateUi() {
   el.sourceChain.value = state.sourceId;
   el.destChain.value = state.destId;
   el.recipientInput.placeholder = destIsStellar() ? "G... / M... / C..." : "0x...";
-  el.forwardingToggleWrap.classList.toggle("hidden", !circleForwardingAvailable());
+  el.sourceBalanceOut.textContent = sourceSignerConnected() ? "Connected" : "Connect wallet";
+  el.forwardingToggleWrap.disabled = !autoDeliveryAvailable();
+  el.forwardingToggleWrap.classList.toggle("unavailable", !autoDeliveryAvailable());
   el.forwardingToggle.checked = state.useCircleForwarding;
 
   el.sourceWalletTitle.textContent = sourceIsStellar() ? "Connect Stellar source" : "Connect EVM source";
@@ -828,11 +866,15 @@ function updateUi() {
 
   if (state.speed === "fast" && !canUseFast()) state.speed = "standard";
   el.fastBtn.disabled = !canUseFast();
-  el.fastBtn.classList.toggle("active", state.speed === "fast");
-  el.standardBtn.classList.toggle("active", state.speed === "standard");
+  el.standardBtn.classList.toggle("active", routeMode() === "standard");
+  el.fastBtn.classList.toggle("active", routeMode() === "fast");
+  el.forwardingToggleWrap.classList.toggle("active", routeMode() === "delivery");
   el.fastMeta.textContent = canUseFast()
-    ? "Confirmed finality, fee applies."
+    ? "Quick attestation"
     : "Fast is unavailable from this source.";
+  el.forwardingToggleWrap.querySelector("span").textContent = autoDeliveryAvailable()
+    ? "No receive step"
+    : "Unavailable here";
 
   const routeInfo = getRouteNotice();
   el.routeNotice.className = `notice ${routeInfo.tone}`;
@@ -1025,16 +1067,55 @@ function updateSuccess() {
   el.successReceiveTx.innerHTML = txLink(state.flow.forwardTxHash || state.flow.receiveTxHash, destChain());
 }
 
-async function refreshQuote() {
+function cancelScheduledRouteRefresh() {
+  if (state.quoteTimer) {
+    clearTimeout(state.quoteTimer);
+    state.quoteTimer = null;
+  }
+}
+
+function resetRouteChecks() {
+  cancelScheduledRouteRefresh();
+  state.quoteRequestId += 1;
+  state.quote = blankQuote();
+  state.allowance = { status: "idle", allowance6: null, lastUpdated: "" };
+}
+
+function scheduleRouteRefresh() {
+  resetRouteChecks();
+  updateUi();
+  if (amount6() <= 0n || sameDomainRoute()) return;
+  const requestId = state.quoteRequestId;
+  state.quoteTimer = setTimeout(() => {
+    autoRefreshRouteChecks(requestId);
+  }, 300);
+}
+
+async function autoRefreshRouteChecks(requestId) {
+  if (requestId !== state.quoteRequestId) return;
+  if (needsFeeQuote()) {
+    await refreshQuote({ silent: true, requestId });
+  } else if (requestId === state.quoteRequestId) {
+    state.quote.status = "ready";
+    updateUi();
+  }
+  if (requestId === state.quoteRequestId && state.speed === "fast") {
+    await refreshAllowance({ silent: true, requestId });
+  }
+}
+
+async function refreshQuote({ silent = false, requestId = ++state.quoteRequestId } = {}) {
   state.quote = blankQuote();
   if (!needsFeeQuote()) {
+    if (requestId !== state.quoteRequestId) return;
     state.quote.status = "ready";
     updateUi();
     return;
   }
   if (amount6() <= 0n) {
+    if (requestId !== state.quoteRequestId) return;
     state.quote.status = "idle";
-    toast("info", "Amount needed", "Enter an amount before quoting fees.");
+    if (!silent) toast("info", "Amount needed", "Enter an amount before quoting fees.");
     updateUi();
     return;
   }
@@ -1050,6 +1131,7 @@ async function refreshQuote() {
     const rows = Array.isArray(json) ? json : Object.values(json?.fees ?? json?.data ?? {});
     const row = rows.find((candidate) => Number(candidate.finalityThreshold ?? candidate.finality_threshold) === minFinality()) ?? rows[0];
     if (!row) throw new Error("Circle returned no fee rows for this route.");
+    if (requestId !== state.quoteRequestId) return;
     const forwardFee = usesCircleForwarding() ? pickForwardFee(row.forwardFee ?? row.forward_fee ?? {}) : 0n;
     const protocolFee = state.speed === "fast" ? calculateProtocolFee(amount6(), row.minimumFee ?? row.minimum_fee ?? 0) : 0n;
     const estimatedFee = forwardFee + protocolFee;
@@ -1063,18 +1145,20 @@ async function refreshQuote() {
       error: "",
       fetchedAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     };
-    toast("ok", "Quote ready", `Estimated receive ${fmt(receiveDestUnits(), destDecimals())}`);
+    if (!silent) toast("ok", "Quote ready", `Estimated receive ${fmt(receiveDestUnits(), destDecimals())}`);
   } catch (error) {
+    if (requestId !== state.quoteRequestId) return;
     state.quote.status = "error";
     state.quote.error = errorMessage(error);
-    toast("err", "Quote failed", state.quote.error, 7000);
+    if (!silent) toast("err", "Quote failed", state.quote.error, 7000);
   } finally {
-    updateUi();
+    if (requestId === state.quoteRequestId) updateUi();
   }
 }
 
-async function refreshAllowance() {
+async function refreshAllowance({ silent = false, requestId = ++state.quoteRequestId } = {}) {
   if (state.speed !== "fast") {
+    if (requestId !== state.quoteRequestId) return;
     state.allowance = { status: "idle", allowance6: null, lastUpdated: "" };
     updateUi();
     return;
@@ -1086,17 +1170,19 @@ async function refreshAllowance() {
     const json = await response.json();
     log("Fast allowance response", json);
     if (!response.ok) throw new Error(json?.message || `Circle allowance API ${response.status}`);
+    if (requestId !== state.quoteRequestId) return;
     state.allowance = {
       status: "ready",
       allowance6: parseUnits(String(json.allowance ?? "0"), DECIMALS_EVM),
       lastUpdated: json.lastUpdated ?? "",
     };
-    toast("ok", "Fast allowance checked", allowanceLabel());
+    if (!silent) toast("ok", "Fast allowance checked", allowanceLabel());
   } catch (error) {
+    if (requestId !== state.quoteRequestId) return;
     state.allowance.status = "error";
-    toast("err", "Allowance check failed", errorMessage(error), 7000);
+    if (!silent) toast("err", "Allowance check failed", errorMessage(error), 7000);
   } finally {
-    updateUi();
+    if (requestId === state.quoteRequestId) updateUi();
   }
 }
 
@@ -2035,15 +2121,14 @@ function setEnv(nextEnv) {
 
 function setSpeed(speed) {
   state.speed = speed;
-  state.quote = blankQuote();
-  updateUi();
+  if (speed !== "fast") state.useCircleForwarding = false;
+  scheduleRouteRefresh();
 }
 
 function resetFlow(clearInputs = true) {
   stopPolling();
+  resetRouteChecks();
   state.flow = blankFlow();
-  state.quote = blankQuote();
-  state.allowance = { status: "idle", allowance6: null, lastUpdated: "" };
   if (clearInputs) {
     el.amountInput.value = "";
     el.recipientInput.value = "";
@@ -2053,6 +2138,11 @@ function resetFlow(clearInputs = true) {
     el.attestationText.value = "";
   }
   updateUi();
+}
+
+function handleTransferInputChange() {
+  resetFlow(false);
+  scheduleRouteRefresh();
 }
 
 function copySummary() {
@@ -2306,39 +2396,31 @@ function bindEvents() {
     state.sourceId = el.sourceChain.value;
     if (state.sourceId === state.destId) state.destId = chains().find((chain) => chain.id !== state.sourceId)?.id ?? state.destId;
     resetFlow(false);
+    scheduleRouteRefresh();
   };
   el.destChain.onchange = () => {
     state.destId = el.destChain.value;
     if (state.sourceId === state.destId) state.sourceId = chains().find((chain) => chain.id !== state.destId)?.id ?? state.sourceId;
     resetFlow(false);
+    scheduleRouteRefresh();
   };
   el.swapRouteBtn.onclick = () => {
     [state.sourceId, state.destId] = [state.destId, state.sourceId];
     resetFlow(false);
+    scheduleRouteRefresh();
   };
-  el.amountInput.oninput = () => {
-    state.quote = blankQuote();
-    state.allowance = { status: "idle", allowance6: null, lastUpdated: "" };
-    updateUi();
-  };
-  el.recipientInput.oninput = updateUi;
+  el.amountInput.oninput = handleTransferInputChange;
+  el.recipientInput.oninput = handleTransferInputChange;
   el.feeBufferInput.oninput = () => {
     state.feeBufferPct = Math.max(0, Number(el.feeBufferInput.value) || 0);
     if (state.quote.status === "ready") state.quote.maxFee6 = applyBuffer(state.quote.estimatedFee6, state.feeBufferPct);
     updateUi();
   };
-  el.forwardingToggle.onchange = () => {
-    state.useCircleForwarding = el.forwardingToggle.checked;
-    state.quote = blankQuote();
-    updateUi();
-  };
+  el.forwardingToggleWrap.onclick = () => setRouteMode("delivery");
   el.refreshQuoteBtn.onclick = () => runAdvanced(refreshQuote);
   el.refreshAllowanceBtn.onclick = () => runAdvanced(refreshAllowance);
-  el.fastBtn.onclick = () => {
-    if (!canUseFast()) return toast("info", "Fast unavailable", "This source chain is Standard-only.");
-    setSpeed("fast");
-  };
-  el.standardBtn.onclick = () => setSpeed("standard");
+  el.fastBtn.onclick = () => setRouteMode("fast");
+  el.standardBtn.onclick = () => setRouteMode("standard");
   el.sourceWalletBtn.onclick = () => openConnect("source");
   el.destWalletBtn.onclick = () => openConnect("dest");
   el.useConnectedRecipientBtn.onclick = () => {
@@ -2367,6 +2449,9 @@ function bindEvents() {
   el.useAttestationBtn.onclick = usePastedAttestation;
   el.manualReceiveBtn.onclick = () => runAdvanced(destIsStellar() ? receiveOnStellar : receiveOnEvm);
   el.useManualAddressBtn.onclick = useManualAddress;
+  document.querySelectorAll("[data-preset]").forEach((button) => {
+    button.onclick = () => toast("info", "Balance presets coming soon", "Wallet balance reads will power these shortcuts next.");
+  });
   el.backdrop.onclick = handleUserModalClose;
   document.querySelectorAll("[data-close]").forEach((button) => {
     button.onclick = handleUserModalClose;

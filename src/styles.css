@@ -182,6 +182,283 @@ h3 {
   margin-bottom: 18px;
 }
 
+.swap-card {
+  position: relative;
+  display: grid;
+  gap: 12px;
+}
+
+.swap-panel {
+  border: 1px solid var(--line);
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 16px;
+}
+
+.swap-panel-top,
+.chain-balance-row,
+.recipient-card,
+.quote-summary div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-label {
+  display: inline-flex;
+  border-radius: 10px;
+  background: #eef2f7;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+  padding: 9px 12px;
+}
+
+.wallet-chip {
+  border: 1px solid var(--line);
+  background: #f8fafc;
+  border-radius: 999px;
+  min-width: 168px;
+  max-width: 48%;
+  min-height: 44px;
+  padding: 8px 10px 8px 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 14px;
+  gap: 9px;
+  align-items: center;
+  text-align: left;
+}
+
+.wallet-chip strong,
+.wallet-chip small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wallet-chip strong {
+  font-size: 13px;
+}
+
+.wallet-chip small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.wallet-chip i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.wallet-chip.good {
+  border-color: #9dddbc;
+  background: var(--green-soft);
+}
+
+.wallet-chip.good i {
+  background: var(--green);
+}
+
+.chain-balance-row {
+  margin-top: 18px;
+}
+
+.chain-select {
+  position: relative;
+  display: block;
+  min-width: 220px;
+}
+
+.chain-select span,
+.balance-pill span,
+.amount-box span,
+.quote-summary span,
+.recipient-card p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chain-select span {
+  display: block;
+  margin-bottom: 7px;
+  font-weight: 800;
+}
+
+.chain-select select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f8fafc;
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 900;
+  padding: 14px 42px 14px 14px;
+}
+
+.balance-pill {
+  text-align: right;
+  min-width: 140px;
+}
+
+.balance-pill span,
+.balance-pill strong {
+  display: block;
+}
+
+.balance-pill strong {
+  margin-top: 7px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.receive-pill strong {
+  color: var(--green);
+}
+
+.amount-box {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  background: #f8fafc;
+  border-radius: 16px;
+  min-height: 112px;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "label label" "input token";
+  gap: 12px;
+  align-items: end;
+}
+
+.amount-box span {
+  grid-area: label;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.amount-box input {
+  grid-area: input;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 40px;
+  font-weight: 850;
+  line-height: 1;
+  min-width: 0;
+}
+
+.amount-box b {
+  grid-area: token;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.amount-presets {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.amount-presets button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 10px;
+  min-height: 36px;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.amount-presets button:hover {
+  background: #eef2f7;
+}
+
+.swap-card > .swap-btn {
+  position: relative;
+  z-index: 2;
+  width: 50px;
+  height: 50px;
+  justify-self: center;
+  margin: -31px 0;
+  border-radius: 16px;
+}
+
+.route-mode {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.quote-summary {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  background: #f8fafc;
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.quote-summary strong {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.quote-summary div:first-child strong,
+.quote-summary div:nth-child(2) strong {
+  font-size: 16px;
+}
+
+.recipient-card {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.recipient-card strong {
+  display: block;
+}
+
+.recipient-card p {
+  margin-top: 4px;
+}
+
+.recipient-field {
+  margin-top: 10px;
+}
+
+.route-tools {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.fee-details {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.fee-details .quiet {
+  grid-column: 1 / -1;
+}
+
 .env-switch {
   display: flex;
   border: 1px solid var(--line);
@@ -383,6 +660,10 @@ h3 {
 .speed-card.active {
   border-color: #8aa5f6;
   background: var(--blue-soft);
+}
+
+.speed-card.unavailable {
+  opacity: .48;
 }
 
 .toggle-line,
@@ -925,10 +1206,64 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .swap-btn {
+  .route-board .swap-btn {
     width: 42px;
     justify-self: center;
     transform: rotate(90deg);
+  }
+
+  .swap-panel {
+    padding: 14px;
+  }
+
+  .swap-panel-top,
+  .chain-balance-row,
+  .recipient-card {
+    align-items: flex-start;
+  }
+
+  .wallet-chip {
+    max-width: 56%;
+    min-width: 0;
+  }
+
+  .chain-balance-row {
+    gap: 10px;
+  }
+
+  .chain-select {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .balance-pill {
+    min-width: 96px;
+  }
+
+  .amount-box {
+    min-height: 100px;
+  }
+
+  .amount-box input {
+    font-size: 36px;
+  }
+
+  .fee-details {
+    grid-template-columns: 1fr;
+  }
+
+  .swap-card > .swap-btn {
+    width: 48px;
+    height: 48px;
+  }
+
+  .route-tools {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .route-tools .buffer-line {
+    grid-column: 1 / -1;
   }
 
   .toggle-line {

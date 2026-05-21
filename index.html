@@ -38,65 +38,121 @@
         </div>
       </div>
 
-      <div class="route-board">
-        <label class="field">
-          <span>Source chain</span>
-          <select id="sourceChain"></select>
-        </label>
-        <button class="swap-btn" id="swapRouteBtn" type="button" title="Swap route" aria-label="Swap source and destination">-></button>
-        <label class="field">
-          <span>Destination chain</span>
-          <select id="destChain"></select>
-        </label>
+      <div class="swap-card">
+        <section class="swap-panel from-panel" aria-label="Source transfer details">
+          <div class="swap-panel-top">
+            <span class="panel-label">From</span>
+            <button class="wallet-chip" id="sourceWalletBtn" type="button">
+              <span>
+                <strong id="sourceWalletTitle">Connect source wallet</strong>
+                <small id="sourceWalletMeta">Required</small>
+              </span>
+              <i aria-hidden="true"></i>
+            </button>
+          </div>
+
+          <div class="chain-balance-row">
+            <label class="chain-select">
+              <span>Source chain</span>
+              <select id="sourceChain"></select>
+            </label>
+            <div class="balance-pill receive-pill">
+              <span>Balance</span>
+              <strong id="sourceBalanceOut">Connect wallet</strong>
+            </div>
+          </div>
+
+          <label class="amount-box">
+            <span>You send</span>
+            <input id="amountInput" inputmode="decimal" autocomplete="off" placeholder="0.00">
+            <b>USDC</b>
+          </label>
+
+          <div class="amount-presets" aria-label="Quick amount">
+            <button type="button" data-preset="25">25%</button>
+            <button type="button" data-preset="50">50%</button>
+            <button type="button" data-preset="75">75%</button>
+            <button type="button" data-preset="max">MAX</button>
+          </div>
+        </section>
+
+        <button class="swap-btn" id="swapRouteBtn" type="button" title="Swap route" aria-label="Swap source and destination">↕</button>
+
+        <section class="swap-panel to-panel" aria-label="Destination transfer details">
+          <div class="swap-panel-top">
+            <span class="panel-label">To</span>
+            <button class="wallet-chip" id="destWalletBtn" type="button">
+              <span>
+                <strong id="destWalletTitle">Connect receiver wallet</strong>
+                <small id="destWalletMeta">Optional autofill</small>
+              </span>
+              <i aria-hidden="true"></i>
+            </button>
+          </div>
+
+          <div class="chain-balance-row">
+            <label class="chain-select">
+              <span>Destination chain</span>
+              <select id="destChain"></select>
+            </label>
+            <div class="balance-pill">
+              <span>Receive</span>
+              <strong id="receiveAmountOut">0.00 USDC</strong>
+            </div>
+          </div>
+
+          <div class="route-mode" role="group" aria-label="Transfer mode">
+            <button class="speed-card active" id="standardBtn" type="button">
+              <strong>Standard</strong>
+              <span>Lower fee</span>
+            </button>
+            <button class="speed-card" id="fastBtn" type="button">
+              <strong>Fast</strong>
+              <span id="fastMeta">Quick attestation</span>
+            </button>
+            <button class="speed-card" id="forwardingToggleWrap" type="button">
+              <strong>Auto-deliver</strong>
+              <span>No receive step</span>
+            </button>
+            <input id="forwardingToggle" type="checkbox" hidden checked>
+          </div>
+
+          <div class="quote-summary">
+            <div>
+              <span>You burn</span>
+              <strong id="burnAmountOut">0.00 USDC</strong>
+            </div>
+            <div>
+              <span>Bridge fee</span>
+              <strong id="feeEstimateOut">0.00 USDC</strong>
+            </div>
+            <div>
+              <span>maxFee</span>
+              <strong id="maxFeeOut">0.00 USDC</strong>
+            </div>
+            <div>
+              <span>Status</span>
+              <strong id="quoteStatus">Not quoted</strong>
+            </div>
+          </div>
+
+          <div class="recipient-card">
+            <div>
+              <strong>Send to a different address</strong>
+              <p>Bridge to your wallet or another recipient.</p>
+            </div>
+            <button class="small-btn" id="useConnectedRecipientBtn" type="button" disabled>Use wallet</button>
+          </div>
+          <label class="field recipient-field">
+            <span>Receiving address</span>
+            <input id="recipientInput" class="mono" autocomplete="off" placeholder="0x... or G...">
+          </label>
+        </section>
       </div>
 
-      <div class="form-grid">
-        <label class="field amount-field">
-          <span>You send</span>
-          <input id="amountInput" inputmode="decimal" autocomplete="off" placeholder="0.00">
-        </label>
-        <label class="field">
-          <span>Receiving address</span>
-          <input id="recipientInput" class="mono" autocomplete="off" placeholder="0x... or G...">
-        </label>
-      </div>
-
-      <div class="wallet-grid">
-        <button class="wallet-btn" id="sourceWalletBtn" type="button">
-          <span>
-            <strong id="sourceWalletTitle">Connect source wallet</strong>
-            <small id="sourceWalletMeta">Required</small>
-          </span>
-          <span aria-hidden="true">-></span>
-        </button>
-        <button class="wallet-btn" id="destWalletBtn" type="button">
-          <span>
-            <strong id="destWalletTitle">Connect receiver wallet</strong>
-            <small id="destWalletMeta">Optional autofill</small>
-          </span>
-          <span aria-hidden="true">-></span>
-        </button>
-      </div>
-
-      <div class="toolbar">
-        <button class="small-btn" id="useConnectedRecipientBtn" type="button" disabled>Use connected recipient</button>
+      <div class="route-tools">
         <button class="small-btn primary" id="refreshQuoteBtn" type="button">Refresh quote</button>
         <button class="small-btn" id="refreshAllowanceBtn" type="button">Check fast allowance</button>
-      </div>
-
-      <div class="transfer-options">
-        <button class="speed-card active" id="fastBtn" type="button">
-          <strong>Fast</strong>
-          <span id="fastMeta">Confirmed finality, fee applies.</span>
-        </button>
-        <button class="speed-card" id="standardBtn" type="button">
-          <strong>Standard</strong>
-          <span>Hard finality, usually no protocol fee.</span>
-        </button>
-        <label class="toggle-line" id="forwardingToggleWrap">
-          <input id="forwardingToggle" type="checkbox" checked>
-          <span>Use Circle auto-delivery when destination supports it</span>
-        </label>
         <label class="buffer-line">
           <span>maxFee buffer</span>
           <input id="feeBufferInput" inputmode="numeric" value="20">
@@ -109,36 +165,14 @@
         <span id="routeNoticeText">Quote the transfer to continue.</span>
       </div>
 
-      <section class="quote-panel" aria-labelledby="quoteHeading">
-        <div class="quote-head">
-          <h3 id="quoteHeading">Quote</h3>
-          <span id="quoteStatus">Not quoted</span>
+      <section class="fee-details" aria-label="Fee details">
+        <div class="metric">
+          <span>Forwarding fee</span>
+          <strong id="forwardFeeOut">-</strong>
         </div>
-        <div class="quote-grid">
-          <div class="metric">
-            <span>You burn</span>
-            <strong id="burnAmountOut">0.00 USDC</strong>
-          </div>
-          <div class="metric receive">
-            <span>Estimated receive</span>
-            <strong id="receiveAmountOut">0.00 USDC</strong>
-          </div>
-          <div class="metric">
-            <span>Circle fee estimate</span>
-            <strong id="feeEstimateOut">0.00 USDC</strong>
-          </div>
-          <div class="metric">
-            <span>maxFee parameter</span>
-            <strong id="maxFeeOut">0.00 USDC</strong>
-          </div>
-          <div class="metric">
-            <span>Forwarding fee</span>
-            <strong id="forwardFeeOut">-</strong>
-          </div>
-          <div class="metric">
-            <span>Protocol fee</span>
-            <strong id="protocolFeeOut">-</strong>
-          </div>
+        <div class="metric">
+          <span>Protocol fee</span>
+          <strong id="protocolFeeOut">-</strong>
         </div>
         <p id="quoteNote" class="quiet">Fees are fetched from Circle before signing.</p>
       </section>

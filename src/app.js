@@ -1774,8 +1774,7 @@ async function signStellarXdr(xdr) {
   }
   if (state.stellar.mode === "wc") {
     const chain = state.env === "mainnet" ? "stellar:pubnet" : "stellar:testnet";
-    const signingId = showSigning("Action required in mobile wallet", "Approve the pending request in your connected Stellar wallet.", openStellarRequestWallet, null);
-    setTimeout(openStellarRequestWallet, 400);
+    const signingId = showSigning("Action required in mobile wallet", "A WalletConnect request has been sent. Open your connected Stellar wallet to approve it.", openStellarRequestWallet, null);
     try {
       const result = await state.stellar.wc.request({
         topic: state.stellar.session.topic,
@@ -1875,8 +1874,7 @@ async function switchEvm(chain) {
 async function evmSend(tx) {
   if (state.evm.mode === "manual") throw new Error("Manual EVM address cannot sign.");
   if (state.evm.mode === "wc") {
-    const signingId = showSigning("Action required in EVM wallet", "Approve the pending WalletConnect transaction in your connected EVM wallet.", openEvmRequestWallet, null);
-    setTimeout(openEvmRequestWallet, 500);
+    const signingId = showSigning("Action required in EVM wallet", "A WalletConnect request has been sent. Open your connected EVM wallet to approve it.", openEvmRequestWallet, null);
     try {
       const result = await state.evm.wc.request({
         topic: state.evm.session.topic,

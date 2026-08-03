@@ -8,6 +8,7 @@ A browser-based prototype for bridging native USDC with Circle CCTP V2 across St
 - Stellar Testnet source and destination support.
 - EVM testnet routes for Base, Ethereum Sepolia, Arbitrum Sepolia, OP Sepolia, Avalanche Fuji, and Polygon Amoy.
 - Circle CCTP V2 fee quote, Fast Transfer allowance, message polling, attestation handling, and manual receive fallback.
+- A two-minute post-attestation grace period keeps manual recovery out of the primary flow while Circle auto-delivery is still progressing.
 - Circle auto-delivery for eligible EVM destinations from EVM sources and Stellar testnet.
 - Stellar `CctpForwarder` handling for inbound Stellar routes.
 - Confirmed EVM transaction receipts before the UI advances approval, burn, or receive steps.

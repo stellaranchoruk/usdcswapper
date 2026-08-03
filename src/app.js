@@ -6,6 +6,7 @@ const CIRCLE_FORWARD_HOOK =
   "0x636374702d666f72776172640000000000000000000000000000000000000000";
 const TIMEOUT_SECONDS = 180;
 const EVM_RECEIPT_TIMEOUT_MS = 240000;
+const AUTO_DELIVERY_GRACE_MS = 120000;
 const MAX_BURN_UNITS6 = 10000000n * 10n ** DECIMALS_EVM;
 const WALLETCONNECT_PROJECT_ID = "f658ce3a7c8a185214974f71539fea39";
 const VAULT_SIGNER_KEY = "GA2T6GR7VXXXBETTERSAFETHANSORRYXXXPROTECTEDBYLOBSTRVAULT";
@@ -461,6 +462,8 @@ function blankFlow() {
     forwardTxHash: "",
     messageHex: "",
     attestationHex: "",
+    attestationReadyAt: 0,
+    forwardFailed: false,
     nonce: "",
     statusText: "",
     verified: "unknown",
@@ -580,6 +583,20 @@ function autoDeliveryAvailable() {
 
 function usesCircleForwarding() {
   return autoDeliveryAvailable() && state.speed === "fast" && state.useCircleForwarding;
+}
+
+function autoDeliveryFallbackReady() {
+  if (!usesCircleForwarding()) return true;
+  if (state.flow.forwardFailed) return true;
+  return !!state.flow.attestationReadyAt && Date.now() - state.flow.attestationReadyAt >= AUTO_DELIVERY_GRACE_MS;
+}
+
+function autoDeliveryGraceLabel() {
+  const remainingMs = Math.max(0, AUTO_DELIVERY_GRACE_MS - (Date.now() - state.flow.attestationReadyAt));
+  const remainingSeconds = Math.ceil(remainingMs / 1000);
+  const minutes = Math.floor(remainingSeconds / 60);
+  const seconds = remainingSeconds % 60;
+  return minutes ? `${minutes}m ${String(seconds).padStart(2, "0")}s` : `${seconds}s`;
 }
 
 function needsFeeQuote() {
@@ -799,6 +816,14 @@ function currentAction() {
       active: 4,
     };
   }
+  if (usesCircleForwarding() && !state.flow.autoDelivered && !autoDeliveryFallbackReady()) {
+    return {
+      label: "Auto-delivery in progress",
+      helper: `Circle has attested the burn and is completing delivery. Manual recovery unlocks in ${autoDeliveryGraceLabel()}.`,
+      disabled: true,
+      active: 5,
+    };
+  }
   if (destIsEvm() && !state.flow.manualReceived && !state.flow.autoDelivered) {
     if (!destSignerConnected()) {
       return {
@@ -817,8 +842,10 @@ function currentAction() {
       };
     }
     return {
-      label: usesCircleForwarding() ? "Manual receive fallback" : `Receive on ${destChain().shortLabel}`,
-      helper: "Submit receiveMessage(message, attestation) on the destination MessageTransmitter.",
+      label: usesCircleForwarding() ? "Recover manually" : `Receive on ${destChain().shortLabel}`,
+      helper: usesCircleForwarding()
+        ? "Auto-delivery is still unconfirmed. You can keep waiting or submit receiveMessage manually."
+        : "Submit receiveMessage(message, attestation) on the destination MessageTransmitter.",
       fn: receiveOnEvm,
       active: 5,
     };
@@ -1091,7 +1118,7 @@ function getRouteNotice() {
     return {
       tone: "good",
       title: "Circle Forwarding Service route",
-      text: "The burn uses the cctp-forward hook. Completion is only marked when Iris returns a forwardTxHash, or when manual receive succeeds.",
+      text: "The burn uses the cctp-forward hook. After attestation, Circle gets an uninterrupted delivery window before manual recovery is offered.",
     };
   }
   return {
@@ -1146,7 +1173,7 @@ function routeModelNote() {
     return "Stellar address type is preserved by CctpForwarder hook data. Never mint directly to a user G or M address.";
   }
   if (usesCircleForwarding()) {
-    return "If Circle auto-delivery stalls, the same message and attestation can be used for manual receive on EVM.";
+    return "Manual recovery stays hidden while Circle is completing a normal auto-delivery.";
   }
   return "The app keeps the message and attestation available so a failed mint can be retried safely.";
 }
@@ -1192,8 +1219,10 @@ function updateTimeline(activeIndex) {
         ? "Auto-delivered"
         : state.flow.manualReceived
           ? "Manual receive complete"
-          : state.flow.messageHex
-            ? "Manual receive available"
+          : state.flow.messageHex && usesCircleForwarding() && !autoDeliveryFallbackReady()
+            ? "Auto-delivery in progress"
+            : state.flow.messageHex
+              ? usesCircleForwarding() ? "Manual recovery available" : "Manual receive available"
             : "Waiting",
       done: state.flow.autoDelivered || state.flow.manualReceived,
     },
@@ -1576,7 +1605,7 @@ async function fetchMessage({ silent = false } = {}) {
     item.destination_tx_hash ??
     "";
   const forwardState = String(item.forwardState ?? item.forward_state ?? "").toUpperCase();
-  let forwardFailed = false;
+  let forwardFailed = state.flow.forwardFailed || ["FAILED", "REVERTED"].includes(forwardState);
   state.flow.nonce = String(item.eventNonce ?? item.nonce ?? item.decodedMessage?.nonce ?? "");
   el.nonceInput.value = state.flow.nonce;
   if (forwardTxHash) {
@@ -1594,6 +1623,7 @@ async function fetchMessage({ silent = false } = {}) {
     }
     if (!receiptSucceeded(receipt)) {
       forwardFailed = true;
+      state.flow.forwardFailed = true;
       state.flow.statusText = "Circle forward transaction reverted. Manual recovery may be required.";
     } else {
       state.flow.autoDelivered = true;
@@ -1609,14 +1639,26 @@ async function fetchMessage({ silent = false } = {}) {
   if (message && attestation && attestation !== "PENDING") {
     state.flow.messageHex = normalizeHex(message);
     state.flow.attestationHex = normalizeHex(attestation);
+    state.flow.attestationReadyAt ||= Date.now();
+    state.flow.forwardFailed = forwardFailed;
     state.flow.statusText = forwardFailed
       ? "Circle forwarding failed. The attestation is ready for manual receive recovery."
       : usesCircleForwarding()
-        ? "Attestation ready. No confirmed forward transaction yet; manual receive fallback is available."
+        ? autoDeliveryFallbackReady()
+          ? "Auto-delivery is still unconfirmed. Manual recovery is now available."
+          : "Attestation ready. Circle auto-delivery is in progress."
       : "Attestation ready.";
     el.messageText.value = state.flow.messageHex;
     el.attestationText.value = state.flow.attestationHex;
-    if (!silent) toast("ok", "Attestation ready", "Manual receive is available.");
+    if (!silent) {
+      toast(
+        "ok",
+        "Attestation ready",
+        usesCircleForwarding() && !autoDeliveryFallbackReady()
+          ? "Circle is completing auto-delivery."
+          : "Manual receive is available."
+      );
+    }
     updateUi();
     return true;
   }

@@ -31,6 +31,7 @@ Best path:
 - Fees must be fetched from `/v2/burn/USDC/fees/{sourceDomain}/{destDomain}` and not hardcoded. Use `forward=true` when quoting Circle Forwarding Service routes.
 - For Forwarding Service routes, `maxFee` must cover the CCTP protocol fee plus the forwarding fee. Circle recommends a buffer.
 - Attestations come from `/v2/messages/{sourceDomainId}?transactionHash=...`. Forwarding routes should not be marked complete just because an attestation exists; the UI should wait for a destination/forward transaction hash or offer manual receive recovery.
+- For Forwarding Service routes, wait two minutes after the attestation becomes ready before promoting manual recovery. Unlock recovery immediately only when the destination transaction is confirmed failed.
 - EVM approvals, burns, manual receives, and forwarded destination transactions must have successful receipts before their steps are marked complete.
 
 ## EVM Routes

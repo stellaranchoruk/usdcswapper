@@ -1750,8 +1750,13 @@ function usePastedAttestation() {
   }
   state.flow.messageHex = message;
   state.flow.attestationHex = attestation;
+  state.flow.attestationReadyAt ||= Date.now();
   state.flow.statusText = "Using pasted message and attestation.";
-  toast("ok", "Attestation loaded", "Manual receive is available.");
+  toast(
+    "ok",
+    "Attestation loaded",
+    usesCircleForwarding() ? "Circle is completing auto-delivery." : "Manual receive is available."
+  );
   updateUi();
 }
 

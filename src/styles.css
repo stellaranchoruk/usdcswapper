@@ -382,6 +382,12 @@ h3 {
   background: #eef2f7;
 }
 
+.amount-presets button:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+  background: transparent;
+}
+
 .swap-card > .swap-btn {
   position: relative;
   z-index: 2;
@@ -1223,7 +1229,7 @@ textarea {
   }
 
   .wallet-chip {
-    max-width: 56%;
+    max-width: 70%;
     min-width: 0;
   }
 
@@ -1234,6 +1240,11 @@ textarea {
   .chain-select {
     min-width: 0;
     flex: 1;
+  }
+
+  .chain-select select {
+    font-size: 15px;
+    padding: 13px 34px 13px 12px;
   }
 
   .balance-pill {

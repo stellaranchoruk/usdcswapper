@@ -5,6 +5,8 @@ const ZERO_BYTES32_HEX = `0x${"00".repeat(32)}`;
 const CIRCLE_FORWARD_HOOK =
   "0x636374702d666f72776172640000000000000000000000000000000000000000";
 const TIMEOUT_SECONDS = 180;
+const EVM_RECEIPT_TIMEOUT_MS = 240000;
+const MAX_BURN_UNITS6 = 10000000n * 10n ** DECIMALS_EVM;
 const WALLETCONNECT_PROJECT_ID = "f658ce3a7c8a185214974f71539fea39";
 const VAULT_SIGNER_KEY = "GA2T6GR7VXXXBETTERSAFETHANSORRYXXXPROTECTEDBYLOBSTRVAULT";
 
@@ -64,6 +66,7 @@ const NETWORKS = {
       messageTransmitter: "CBJ6MTCKKZG73PMDZCJMSFRD7DQEMI4FKDH7CGDSV4W6FHCRBCQAVVJY",
       cctpForwarder: "CA66Q2WFBND6V4UEB7RD4SAXSVIWMD6RA4X3U32ELVFGXV5PJK4T4VSZ",
       usdcContract: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+      usdcIssuer: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
     },
     evm: [
       {
@@ -178,6 +181,7 @@ const NETWORKS = {
       messageTransmitter: "CACMENFFJPJMSDAJQLX4R7K3SFZIW2LJSE3R2UMLGSWHFHS353FVXAZV",
       cctpForwarder: "CBZL2IH7F6BIDAA3WBNXYKIXSATJGMSW7K5P5MJ6STX5RXN47TZJDF5T",
       usdcContract: "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+      usdcIssuer: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
     },
     evm: [
       {
@@ -410,6 +414,8 @@ const state = {
   },
   quote: blankQuote(),
   allowance: { status: "idle", allowance6: null, lastUpdated: "" },
+  sourceBalance: blankSourceBalance(),
+  balanceRequestId: 0,
   flow: blankFlow(),
   pollTimer: null,
   pollCount: 0,
@@ -435,6 +441,10 @@ function blankQuote() {
     error: "",
     fetchedAt: "",
   };
+}
+
+function blankSourceBalance() {
+  return { status: "idle", units: null, error: "", chainId: "", address: "" };
 }
 
 function blankFlow() {
@@ -560,7 +570,8 @@ function usesStellarForwarder() {
 }
 
 function circleForwardingAvailable() {
-  return sourceIsEvm() && destIsEvm() && !!destChain().forwardingDestination;
+  const sourceSupported = sourceIsEvm() || (sourceIsStellar() && state.env === "testnet");
+  return sourceSupported && destIsEvm() && !!destChain().forwardingDestination && !sameDomainRoute();
 }
 
 function autoDeliveryAvailable() {
@@ -652,6 +663,22 @@ function currentAction() {
       active: 0,
     };
   }
+  if (amount6() > MAX_BURN_UNITS6) {
+    return {
+      label: "Amount exceeds CCTP limit",
+      helper: "A single CCTP burn cannot exceed 10,000,000 USDC.",
+      disabled: true,
+      active: 0,
+    };
+  }
+  if (state.sourceBalance.status === "ready" && burnSourceUnits() > (state.sourceBalance.units ?? 0n)) {
+    return {
+      label: "Insufficient USDC balance",
+      helper: `Available balance: ${fmt(state.sourceBalance.units ?? 0n, sourceDecimals())}.`,
+      disabled: true,
+      active: 0,
+    };
+  }
   if (!recipientValid()) {
     return {
       label: "Add recipient",
@@ -704,6 +731,14 @@ function currentAction() {
   }
   if (sourceIsEvm()) {
     if (!state.flow.evmApproved) {
+      if (state.flow.approveTxHash) {
+        return {
+          label: "Check approval confirmation",
+          helper: `Resume confirmation for ${short(state.flow.approveTxHash)} before sending another approval.`,
+          fn: confirmPendingEvmApproval,
+          active: 2,
+        };
+      }
       return {
         label: "Approve EVM USDC",
         helper: `Approve ${fmt(burnSourceUnits(), DECIMALS_EVM)} for TokenMessengerV2.`,
@@ -712,6 +747,14 @@ function currentAction() {
       };
     }
     if (!state.flow.burnSubmitted) {
+      if (state.flow.burnTxHash) {
+        return {
+          label: "Check burn confirmation",
+          helper: `Resume confirmation for ${short(state.flow.burnTxHash)} before sending another burn.`,
+          fn: confirmPendingEvmBurn,
+          active: 3,
+        };
+      }
       return {
         label: usesCircleForwarding() ? "Burn with auto-delivery" : "Burn EVM USDC",
         helper: burnHelperText(),
@@ -762,6 +805,14 @@ function currentAction() {
         label: "Connect EVM receiver",
         helper: "Connect an EVM signing wallet to retry receiveMessage manually.",
         fn: () => openConnect("dest"),
+        active: 5,
+      };
+    }
+    if (state.flow.receiveTxHash) {
+      return {
+        label: "Check receive confirmation",
+        helper: `Resume confirmation for ${short(state.flow.receiveTxHash)} before retrying receiveMessage.`,
+        fn: confirmPendingEvmReceive,
         active: 5,
       };
     }
@@ -847,7 +898,10 @@ function updateUi() {
   el.sourceChain.value = state.sourceId;
   el.destChain.value = state.destId;
   el.recipientInput.placeholder = destIsStellar() ? "G... / M... / C..." : "0x...";
-  el.sourceBalanceOut.textContent = sourceSignerConnected() ? "Connected" : "Connect wallet";
+  el.sourceBalanceOut.textContent = sourceBalanceLabel();
+  document.querySelectorAll("[data-preset]").forEach((button) => {
+    button.disabled = state.sourceBalance.status !== "ready" || (state.sourceBalance.units ?? 0n) <= 0n;
+  });
   el.forwardingToggleWrap.disabled = !autoDeliveryAvailable();
   el.forwardingToggleWrap.classList.toggle("unavailable", !autoDeliveryAvailable());
   el.forwardingToggle.checked = state.useCircleForwarding;
@@ -918,6 +972,104 @@ function updateUi() {
 function walletMeta(wallet, fallback = "Required") {
   if (!wallet.address) return fallback;
   return `${wallet.mode} ${short(wallet.address)}`;
+}
+
+function sourceWalletAddress() {
+  return sourceIsStellar() ? state.stellar.address : state.evm.address;
+}
+
+function sourceBalanceLabel() {
+  if (!sourceWalletAddress()) return "Connect wallet";
+  if (state.sourceBalance.status === "fetching") return "Loading...";
+  if (state.sourceBalance.status === "ready") {
+    return `${editableAmount(state.sourceBalance.units ?? 0n, sourceDecimals())} USDC`;
+  }
+  if (state.sourceBalance.status === "error") return "Unavailable";
+  return "Refresh pending";
+}
+
+function resetSourceBalance() {
+  state.balanceRequestId += 1;
+  state.sourceBalance = blankSourceBalance();
+}
+
+async function refreshSourceBalance({ silent = true } = {}) {
+  const address = sourceWalletAddress();
+  const chain = sourceChain();
+  const requestId = ++state.balanceRequestId;
+  if (!address) {
+    state.sourceBalance = blankSourceBalance();
+    updateUi();
+    return;
+  }
+  state.sourceBalance = {
+    status: "fetching",
+    units: null,
+    error: "",
+    chainId: chain.id,
+    address,
+  };
+  updateUi();
+  try {
+    const units = chain.kind === "stellar"
+      ? await fetchStellarUsdcBalance(address)
+      : await fetchEvmUsdcBalance(chain, address);
+    if (requestId !== state.balanceRequestId) return;
+    state.sourceBalance = {
+      status: "ready",
+      units,
+      error: "",
+      chainId: chain.id,
+      address,
+    };
+  } catch (error) {
+    if (requestId !== state.balanceRequestId) return;
+    state.sourceBalance = {
+      status: "error",
+      units: null,
+      error: errorMessage(error),
+      chainId: chain.id,
+      address,
+    };
+    log("Balance read failed", state.sourceBalance.error);
+    if (!silent) toast("err", "Balance unavailable", state.sourceBalance.error, 7000);
+  } finally {
+    if (requestId === state.balanceRequestId) updateUi();
+  }
+}
+
+async function fetchStellarUsdcBalance(address) {
+  const response = await fetch(`${env().stellar.horizonUrl}/accounts/${encodeURIComponent(address)}`);
+  if (!response.ok) throw new Error(response.status === 404 ? "Stellar account was not found." : `Stellar balance request failed (${response.status}).`);
+  const account = await response.json();
+  const balance = (account.balances ?? []).find((entry) =>
+    entry.asset_code === "USDC" && entry.asset_issuer === env().stellar.usdcIssuer
+  );
+  return parseUnits(balance?.balance ?? "0", DECIMALS_STELLAR);
+}
+
+async function fetchEvmUsdcBalance(chain, address) {
+  const { encodeFunctionData, parseAbi } = await loadViem();
+  const data = encodeFunctionData({
+    abi: parseAbi(["function balanceOf(address account) view returns (uint256)"]),
+    functionName: "balanceOf",
+    args: [address],
+  });
+  const result = await publicEvmRpc(chain, "eth_call", [{ to: chain.usdc, data }, "latest"]);
+  return result ? BigInt(result) : 0n;
+}
+
+function setBalancePreset(preset) {
+  const balance = state.sourceBalance.units;
+  if (state.sourceBalance.status !== "ready" || balance === null) {
+    refreshSourceBalance({ silent: false });
+    return;
+  }
+  const percent = preset === "max" ? 100n : BigInt(preset);
+  let units = (balance * percent) / 100n;
+  if (sourceIsStellar()) units = (units / 10n) * 10n;
+  el.amountInput.value = editableAmount(units, sourceDecimals());
+  handleTransferInputChange();
 }
 
 function getRouteNotice() {
@@ -1186,6 +1338,43 @@ async function refreshAllowance({ silent = false, requestId = ++state.quoteReque
   }
 }
 
+async function confirmPendingEvmApproval() {
+  try {
+    await waitForEvmReceipt(state.flow.approveTxHash, sourceChain(), "USDC approval");
+  } catch (error) {
+    if (transactionReverted(error)) state.flow.approveTxHash = "";
+    throw error;
+  }
+  state.flow.evmApproved = true;
+  toast("ok", "EVM approval confirmed", short(state.flow.approveTxHash));
+}
+
+async function confirmPendingEvmBurn() {
+  try {
+    await waitForEvmReceipt(state.flow.burnTxHash, sourceChain(), "USDC burn");
+  } catch (error) {
+    if (transactionReverted(error)) {
+      state.flow.burnTxHash = "";
+      el.burnHashInput.value = "";
+    }
+    throw error;
+  }
+  markBurnSubmitted(state.flow.burnTxHash);
+  refreshSourceBalance();
+  toast("ok", "Burn confirmed", "Waiting for Circle.");
+}
+
+async function confirmPendingEvmReceive() {
+  try {
+    await waitForEvmReceipt(state.flow.receiveTxHash, destChain(), "USDC receive");
+  } catch (error) {
+    if (transactionReverted(error)) state.flow.receiveTxHash = "";
+    throw error;
+  }
+  state.flow.manualReceived = true;
+  toast("ok", "Manual receive confirmed", short(state.flow.receiveTxHash));
+}
+
 async function approveEvm() {
   const { encodeFunctionData, parseAbi } = await loadViem();
   await switchEvm(sourceChain());
@@ -1196,8 +1385,15 @@ async function approveEvm() {
   });
   const txHash = await evmSend({ from: state.evm.address, to: sourceChain().usdc, data });
   state.flow.approveTxHash = txHash;
+  toast("info", "Approval submitted", "Waiting for source-chain confirmation.");
+  try {
+    await waitForEvmReceipt(txHash, sourceChain(), "USDC approval");
+  } catch (error) {
+    if (transactionReverted(error)) state.flow.approveTxHash = "";
+    throw error;
+  }
   state.flow.evmApproved = true;
-  toast("ok", "EVM approval submitted", short(txHash));
+  toast("ok", "EVM approval confirmed", short(txHash));
 }
 
 async function burnEvm() {
@@ -1221,8 +1417,21 @@ async function burnEvm() {
     ],
   });
   const txHash = await evmSend({ from: state.evm.address, to: evmContracts().tokenMessenger, data });
+  state.flow.burnTxHash = txHash;
+  el.burnHashInput.value = txHash;
+  toast("info", "Burn submitted", "Waiting for source-chain confirmation.");
+  try {
+    await waitForEvmReceipt(txHash, sourceChain(), "USDC burn");
+  } catch (error) {
+    if (transactionReverted(error)) {
+      state.flow.burnTxHash = "";
+      el.burnHashInput.value = "";
+    }
+    throw error;
+  }
   markBurnSubmitted(txHash);
-  toast("ok", "Burn submitted", usesCircleForwarding() ? "Waiting for forwardTxHash." : "Waiting for attestation.");
+  refreshSourceBalance();
+  toast("ok", "Burn confirmed", usesCircleForwarding() ? "Waiting for Circle delivery." : "Waiting for attestation.");
 }
 
 async function evmBurnDestination() {
@@ -1279,6 +1488,7 @@ async function burnStellar() {
   const signedXdr = await signStellarXdr(xdr);
   const txHash = await submitStellarXdr(signedXdr);
   markBurnSubmitted(txHash);
+  refreshSourceBalance();
   toast("ok", "Stellar burn confirmed", "Waiting for Circle.");
 }
 
@@ -1304,8 +1514,15 @@ async function receiveOnEvm() {
   });
   const txHash = await evmSend({ from: state.evm.address, to: evmContracts().messageTransmitter, data });
   state.flow.receiveTxHash = txHash;
+  toast("info", "Receive submitted", "Waiting for destination-chain confirmation.");
+  try {
+    await waitForEvmReceipt(txHash, destChain(), "USDC receive");
+  } catch (error) {
+    if (transactionReverted(error)) state.flow.receiveTxHash = "";
+    throw error;
+  }
   state.flow.manualReceived = true;
-  toast("ok", "Manual receive submitted", short(txHash));
+  toast("ok", "Manual receive confirmed", short(txHash));
 }
 
 async function receiveOnStellar() {
@@ -1337,6 +1554,12 @@ async function fetchMessage({ silent = false } = {}) {
   const response = await fetch(url);
   const json = await response.json();
   log("Iris response", json);
+  if (response.status === 404) {
+    state.flow.statusText = "Circle has not indexed this burn yet.";
+    if (!silent) toast("info", "Not indexed yet", state.flow.statusText);
+    updateUi();
+    return false;
+  }
   if (!response.ok) throw new Error(json?.message || `Iris messages API ${response.status}`);
   const item = json?.messages?.[0] ?? json?.message ?? json?.[0];
   if (!item) {
@@ -1352,24 +1575,44 @@ async function fetchMessage({ silent = false } = {}) {
     item.destinationTxHash ??
     item.destination_tx_hash ??
     "";
+  const forwardState = String(item.forwardState ?? item.forward_state ?? "").toUpperCase();
+  let forwardFailed = false;
   state.flow.nonce = String(item.eventNonce ?? item.nonce ?? item.decodedMessage?.nonce ?? "");
   el.nonceInput.value = state.flow.nonce;
   if (forwardTxHash) {
     state.flow.forwardTxHash = forwardTxHash;
-    state.flow.autoDelivered = true;
-    state.flow.statusText = "Circle forward transaction detected.";
-    toast("ok", "Auto-delivered", short(forwardTxHash));
-    updateUi();
-    stopPolling();
-    return true;
+    let receipt = null;
+    try {
+      receipt = await getEvmReceipt(forwardTxHash, destChain());
+    } catch (error) {
+      log("Forward receipt check failed", errorMessage(error));
+    }
+    if (!receipt) {
+      state.flow.statusText = `Circle forward transaction submitted${forwardState ? ` (${forwardState})` : ""}; waiting for destination confirmation.`;
+      updateUi();
+      return false;
+    }
+    if (!receiptSucceeded(receipt)) {
+      forwardFailed = true;
+      state.flow.statusText = "Circle forward transaction reverted. Manual recovery may be required.";
+    } else {
+      state.flow.autoDelivered = true;
+      state.flow.statusText = "Circle forward transaction confirmed on the destination chain.";
+      toast("ok", "Auto-delivered", short(forwardTxHash));
+      updateUi();
+      stopPolling();
+      return true;
+    }
   }
   const message = item.message && item.message !== "0x" ? item.message : item.messageBytes;
   const attestation = item.attestation;
   if (message && attestation && attestation !== "PENDING") {
     state.flow.messageHex = normalizeHex(message);
     state.flow.attestationHex = normalizeHex(attestation);
-    state.flow.statusText = usesCircleForwarding()
-      ? "Attestation ready. No forwardTxHash yet, so manual receive fallback is available."
+    state.flow.statusText = forwardFailed
+      ? "Circle forwarding failed. The attestation is ready for manual receive recovery."
+      : usesCircleForwarding()
+        ? "Attestation ready. No confirmed forward transaction yet; manual receive fallback is available."
       : "Attestation ready.";
     el.messageText.value = state.flow.messageHex;
     el.attestationText.value = state.flow.attestationHex;
@@ -1587,6 +1830,7 @@ function useManualAddress() {
   }
   autoFillRecipient();
   closeModals();
+  refreshSourceBalance();
   updateUi();
 }
 
@@ -1610,6 +1854,7 @@ async function connectFreighter() {
   await detectVaultOrMultisig(address);
   autoFillRecipient();
   closeModals();
+  refreshSourceBalance();
   toast("ok", "Stellar connected", short(address));
 }
 
@@ -1633,6 +1878,7 @@ async function connectEvmInjected() {
     state.evm.chainId = Number.parseInt(await provider.request({ method: "eth_chainId" }), 16);
     autoFillRecipient();
     closeModals();
+    refreshSourceBalance();
     toast("ok", "EVM connected", short(state.evm.address));
   } catch (error) {
     closeModals();
@@ -1666,6 +1912,7 @@ async function connectStellarWalletConnect() {
   await detectVaultOrMultisig(address);
   autoFillRecipient();
   closeModals();
+  refreshSourceBalance();
   toast("ok", "Stellar connected", short(address));
 }
 
@@ -1673,12 +1920,18 @@ async function connectEvmWalletConnect() {
   const client = await ensureEvmWc();
   const chain = sourceIsEvm() ? sourceChain() : destIsEvm() ? destChain() : env().evm[0];
   const caip = `eip155:${chain.chainId}`;
+  const requestedChains = [...new Set([sourceChain(), destChain()]
+    .filter((candidate) => candidate.kind === "evm")
+    .map((candidate) => `eip155:${candidate.chainId}`))];
   const { uri, approval } = await client.connect({
     optionalNamespaces: {
       eip155: {
-        chains: [caip],
+        chains: requestedChains,
         methods: [
           "eth_sendTransaction",
+          "eth_call",
+          "eth_getTransactionReceipt",
+          "eth_chainId",
           "personal_sign",
           "eth_signTypedData",
           "wallet_switchEthereumChain",
@@ -1695,10 +1948,12 @@ async function connectEvmWalletConnect() {
   const accounts = state.evm.session.namespaces?.eip155?.accounts ?? [];
   const first = accounts.find((account) => account.startsWith(caip)) ?? accounts[0] ?? "";
   state.evm.address = first.split(":")[2] ?? "";
+  if (!isEvmAddress(state.evm.address)) throw new Error("WalletConnect returned an invalid EVM account.");
   state.evm.mode = "wc";
   state.evm.chainId = chain.chainId;
   autoFillRecipient();
   closeModals();
+  refreshSourceBalance();
   toast("ok", "EVM connected", short(state.evm.address));
 }
 
@@ -1931,6 +2186,9 @@ async function prepareSoroban(tx) {
 
 async function switchEvm(chain) {
   if (state.evm.mode === "wc") {
+    if (!walletConnectSupportsChain(chain)) {
+      throw new Error(`${chain.label} was not approved in this WalletConnect session. Reconnect the EVM wallet so all route chains can be authorized.`);
+    }
     state.evm.chainId = chain.chainId;
     return;
   }
@@ -1955,6 +2213,86 @@ async function switchEvm(chain) {
     });
   }
   state.evm.chainId = chain.chainId;
+}
+
+function walletConnectSupportsChain(chain) {
+  const caip = `eip155:${chain.chainId}`;
+  const namespace = state.evm.session?.namespaces?.eip155;
+  if (!namespace) return false;
+  return (namespace.chains ?? []).includes(caip) ||
+    (namespace.accounts ?? []).some((account) => account.startsWith(`${caip}:`));
+}
+
+async function publicEvmRpc(chain, method, params = []) {
+  const response = await fetch(chain.rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params }),
+  });
+  if (!response.ok) throw new Error(`${chain.label} RPC request failed (${response.status}).`);
+  const json = await response.json();
+  if (json.error) throw new Error(json.error.message || `${chain.label} RPC returned an error.`);
+  return json.result;
+}
+
+async function connectedEvmRpc(chain, method, params = []) {
+  if (state.evm.mode === "wc") {
+    if (!walletConnectSupportsChain(chain)) throw new Error(`${chain.label} is not authorized in WalletConnect.`);
+    return state.evm.wc.request({
+      topic: state.evm.session.topic,
+      chainId: `eip155:${chain.chainId}`,
+      request: { method, params },
+    });
+  }
+  const provider = state.evm.provider ?? getInjectedProvider();
+  if (!provider) throw new Error("No EVM provider connected.");
+  return provider.request({ method, params });
+}
+
+async function getEvmReceipt(txHash, chain) {
+  try {
+    return await publicEvmRpc(chain, "eth_getTransactionReceipt", [txHash]);
+  } catch (publicRpcError) {
+    log("Public receipt lookup failed", chain.label, errorMessage(publicRpcError));
+    try {
+      return await connectedEvmRpc(chain, "eth_getTransactionReceipt", [txHash]);
+    } catch (walletRpcError) {
+      throw new Error(`Could not check ${chain.label} transaction status: ${errorMessage(walletRpcError)}`);
+    }
+  }
+}
+
+function receiptSucceeded(receipt) {
+  const status = receipt?.status;
+  if (status === true) return true;
+  if (status === false || status === undefined || status === null) return false;
+  try {
+    return BigInt(status) === 1n;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForEvmReceipt(txHash, chain, label, timeoutMs = EVM_RECEIPT_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  state.flow.statusText = `${label} submitted. Waiting for confirmation on ${chain.label}.`;
+  updateUi();
+  while (Date.now() < deadline) {
+    let receipt = null;
+    try {
+      receipt = await getEvmReceipt(txHash, chain);
+    } catch (error) {
+      log("Receipt check failed", errorMessage(error));
+    }
+    if (receipt) {
+      if (!receiptSucceeded(receipt)) throw new Error(`${label} reverted on ${chain.label}.`);
+      state.flow.statusText = `${label} confirmed on ${chain.label}.`;
+      updateUi();
+      return receipt;
+    }
+    await sleep(2000);
+  }
+  throw new Error(`${label} was submitted but confirmation timed out. Check transaction ${short(txHash)} before retrying.`);
 }
 
 async function evmSend(tx) {
@@ -2102,10 +2440,24 @@ function handleUserModalClose() {
 }
 
 function setEnv(nextEnv) {
-  state.env = nextEnv;
-  state.mainnetArmed = false;
+  if (nextEnv === state.env) return;
   const sourceWasStellar = sourceIsStellar();
   const destWasStellar = destIsStellar();
+  state.env = nextEnv;
+  state.mainnetArmed = false;
+  if (state.stellar.mode === "wc") {
+    state.stellar.address = "";
+    state.stellar.mode = "none";
+    state.stellar.session = null;
+    state.stellar.wcUri = "";
+  }
+  if (state.evm.mode === "wc") {
+    state.evm.address = "";
+    state.evm.mode = "none";
+    state.evm.chainId = null;
+    state.evm.session = null;
+    state.evm.wcUri = "";
+  }
   state.sourceId = sourceWasStellar ? NETWORKS[nextEnv].stellar.id : NETWORKS[nextEnv].evm[0].id;
   state.destId = destWasStellar ? NETWORKS[nextEnv].stellar.id : NETWORKS[nextEnv].evm[0].id;
   if (state.sourceId === state.destId) {
@@ -2114,9 +2466,11 @@ function setEnv(nextEnv) {
   }
   state.quote = blankQuote();
   state.allowance = { status: "idle", allowance6: null, lastUpdated: "" };
+  resetSourceBalance();
   resetFlow(false);
   populateChains();
   updateUi();
+  refreshSourceBalance();
 }
 
 function setSpeed(speed) {
@@ -2211,6 +2565,10 @@ function unitsToAmount(units, decimals) {
   let fraction = String(abs % base).padStart(Number(decimals), "0");
   fraction = fraction.replace(/0+$/, "");
   return `${sign}${whole}${fraction ? `.${fraction}` : ".00"}`;
+}
+
+function editableAmount(units, decimals) {
+  return unitsToAmount(units, decimals).replace(/\.00$/, "");
 }
 
 function fmt(units, decimals) {
@@ -2334,6 +2692,10 @@ function errorMessage(error) {
   return error?.shortMessage || error?.message || String(error);
 }
 
+function transactionReverted(error) {
+  return /revert/i.test(errorMessage(error));
+}
+
 function extractSignedXdr(result) {
   if (result?.error) {
     const error = result.error;
@@ -2395,19 +2757,26 @@ function bindEvents() {
   el.sourceChain.onchange = () => {
     state.sourceId = el.sourceChain.value;
     if (state.sourceId === state.destId) state.destId = chains().find((chain) => chain.id !== state.sourceId)?.id ?? state.destId;
+    resetSourceBalance();
     resetFlow(false);
     scheduleRouteRefresh();
+    refreshSourceBalance();
   };
   el.destChain.onchange = () => {
+    const oldSourceId = state.sourceId;
     state.destId = el.destChain.value;
     if (state.sourceId === state.destId) state.sourceId = chains().find((chain) => chain.id !== state.destId)?.id ?? state.sourceId;
+    if (state.sourceId !== oldSourceId) resetSourceBalance();
     resetFlow(false);
     scheduleRouteRefresh();
+    if (state.sourceId !== oldSourceId) refreshSourceBalance();
   };
   el.swapRouteBtn.onclick = () => {
     [state.sourceId, state.destId] = [state.destId, state.sourceId];
+    resetSourceBalance();
     resetFlow(false);
     scheduleRouteRefresh();
+    refreshSourceBalance();
   };
   el.amountInput.oninput = handleTransferInputChange;
   el.recipientInput.oninput = handleTransferInputChange;
@@ -2450,7 +2819,7 @@ function bindEvents() {
   el.manualReceiveBtn.onclick = () => runAdvanced(destIsStellar() ? receiveOnStellar : receiveOnEvm);
   el.useManualAddressBtn.onclick = useManualAddress;
   document.querySelectorAll("[data-preset]").forEach((button) => {
-    button.onclick = () => toast("info", "Balance presets coming soon", "Wallet balance reads will power these shortcuts next.");
+    button.onclick = () => setBalancePreset(button.dataset.preset);
   });
   el.backdrop.onclick = handleUserModalClose;
   document.querySelectorAll("[data-close]").forEach((button) => {

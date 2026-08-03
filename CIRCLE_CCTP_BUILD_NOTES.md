@@ -1,6 +1,6 @@
 # Circle CCTP Build Notes
 
-Last reviewed: 2026-05-20
+Last reviewed: 2026-08-03
 
 ## Current Chrome Test URL
 
@@ -31,6 +31,7 @@ Best path:
 - Fees must be fetched from `/v2/burn/USDC/fees/{sourceDomain}/{destDomain}` and not hardcoded. Use `forward=true` when quoting Circle Forwarding Service routes.
 - For Forwarding Service routes, `maxFee` must cover the CCTP protocol fee plus the forwarding fee. Circle recommends a buffer.
 - Attestations come from `/v2/messages/{sourceDomainId}?transactionHash=...`. Forwarding routes should not be marked complete just because an attestation exists; the UI should wait for a destination/forward transaction hash or offer manual receive recovery.
+- EVM approvals, burns, manual receives, and forwarded destination transactions must have successful receipts before their steps are marked complete.
 
 ## EVM Routes
 
@@ -68,12 +69,12 @@ Then encode the extended forwarding hook data with ATA setup fields.
 - For inbound transfers to a Stellar user or muxed account, always set both `mintRecipient` and `destinationCaller` to the Stellar `CctpForwarder` contract address and put the final Stellar recipient strkey in hook data.
 - If `mintRecipient` is a Stellar user account instead of `CctpForwarder`, or `destinationCaller` is wrong, funds can become permanently stuck.
 - Stellar `decodedMessage` fields may be `null` in Circle API responses because the API cannot infer address type from raw 32-byte payloads; parse the raw `message` if needed.
-- For Stellar as the source and EVM as the destination, Circle's quickstart uses `deposit_for_burn` and then manual destination `receiveMessage`. Do not enable the Circle Forwarding Service hook on this route until Circle publishes a working Stellar-source forwarding example.
+- Stellar exposes `deposit_for_burn_with_hook`, and Circle's Forwarding Service is requested through source burn hook data. The app enables this for Stellar-to-EVM test routes but keeps it disabled for Stellar mainnet until a signed testnet transfer succeeds.
 - Stellar source approval and burn transactions are Soroban contract invocations. The connected wallet must be able to parse and sign Soroban transaction XDRs; older/classic-only WalletConnect paths can fail with low-level XDR errors such as `Bad union switch`.
 
 ## Implementation Checklist
 
-- Re-test route selectors and wallet modals in Chrome from `http://localhost:4173/`.
+- Complete signed testnet transfers for Stellar -> EVM auto-delivery, EVM -> EVM auto-delivery, and EVM -> Stellar manual forwarder receive.
 - Add Solana chain config for devnet/mainnet, including USDC mint, RPC, explorers, and CCTP program IDs.
 - Add Solana wallet connection layer: Phantom, Solflare, and manual receive address.
 - Add Solana address validation and ATA derivation.
@@ -82,7 +83,7 @@ Then encode the extended forwarding hook data with ATA setup fields.
   - EVM -> Solana: Forwarding Service with ATA handling.
   - Solana -> EVM: Solana burn, EVM manual receive or forwarding.
   - Solana -> Stellar: Solana burn targeting Stellar `CctpForwarder`.
-  - Stellar -> EVM/Solana: Stellar burn and manual/forwarding destination handling after route validation.
+  - Stellar -> EVM: Forwarding Service or manual receive; Stellar -> Solana remains pending Solana integration.
   - EVM/Solana -> Stellar: always Stellar `CctpForwarder`.
 - Add recovery panel for every route: burn hash, message, attestation, destination receive/forward tx, re-attest.
 

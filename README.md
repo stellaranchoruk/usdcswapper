@@ -8,8 +8,11 @@ A browser-based prototype for bridging native USDC with Circle CCTP V2 across St
 - Stellar Testnet source and destination support.
 - EVM testnet routes for Base, Ethereum Sepolia, Arbitrum Sepolia, OP Sepolia, Avalanche Fuji, and Polygon Amoy.
 - Circle CCTP V2 fee quote, Fast Transfer allowance, message polling, attestation handling, and manual receive fallback.
+- Circle auto-delivery for eligible EVM destinations from EVM sources and Stellar testnet.
 - Stellar `CctpForwarder` handling for inbound Stellar routes.
-- Browser extension and WalletConnect wallet flows.
+- Confirmed EVM transaction receipts before the UI advances approval, burn, or receive steps.
+- Live source USDC balances with 25%, 50%, 75%, and MAX amount shortcuts.
+- Browser extension and multi-chain WalletConnect wallet flows.
 
 ## Local Testing
 
@@ -37,8 +40,8 @@ For GitHub Pages, publish from the root of the default branch. No build command 
 
 - Stellar USDC uses 7 decimal places; CCTP/EVM/Solana amounts use 6 decimal subunits.
 - Stellar source approval and burn transactions are Soroban contract invocations. The signing wallet must support Soroban transaction XDR.
-- Stellar -> EVM currently uses `deposit_for_burn` and manual destination `receiveMessage`.
-- EVM -> EVM may use Circle Forwarding Service.
+- EVM -> EVM and Stellar testnet -> EVM can use Circle Forwarding Service or manual destination `receiveMessage`.
+- Forwarded EVM transfers are only marked complete after the destination transaction receipt succeeds.
 - EVM/Solana -> Stellar must target Stellar `CctpForwarder` for inbound Stellar recipients.
 - Solana support is planned but requires Solana wallet connection, Associated Token Account derivation, and Solana CCTP program account construction.
 

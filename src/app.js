@@ -1037,10 +1037,10 @@ function updateUi() {
   el.sourceWalletBtn.classList.toggle("good", sourceSignerConnected());
   el.destWalletBtn.classList.toggle("good", destAddressAvailable());
   el.useConnectedRecipientBtn.disabled = !destAddressAvailable();
-  const showRecipientFields = state.customRecipient || !destAddressAvailable();
+  const showRecipientFields = state.customRecipient;
   el.recipientFields.classList.toggle("open", showRecipientFields);
   el.recipientToggleBtn.classList.toggle("active", state.customRecipient);
-  el.recipientToggleBtn.disabled = !destAddressAvailable();
+  el.recipientToggleBtn.disabled = false;
   el.recipientToggleLabel.textContent = state.customRecipient ? "Sending to another address" : "Send to another address";
   el.recipientToggleMeta.textContent = !destAddressAvailable()
     ? "Connect a receiver or enter an address below."
@@ -3240,11 +3240,14 @@ function bindEvents() {
   el.sourceWalletBtn.onclick = () => openConnect("source");
   el.destWalletBtn.onclick = () => openConnect("dest");
   el.recipientToggleBtn.onclick = () => {
-    if (!destAddressAvailable()) return;
     state.customRecipient = !state.customRecipient;
     if (!state.customRecipient) {
-      state.connectTarget = "dest";
-      autoFillRecipient();
+      if (destAddressAvailable()) {
+        state.connectTarget = "dest";
+        autoFillRecipient();
+      } else {
+        el.recipientInput.value = "";
+      }
       handleTransferInputChange();
       return;
     }

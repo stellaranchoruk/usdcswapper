@@ -676,19 +676,19 @@ function currentAction() {
       active: 0,
     };
   }
-  if (!sourceSignerConnected()) {
-    return {
-      label: sourceIsStellar() ? "Connect Stellar source" : "Connect EVM source",
-      helper: "Connect a signing wallet for the source chain.",
-      fn: () => openConnect("source"),
-      active: 0,
-    };
-  }
   if (burnSourceUnits() <= 0n) {
     return {
       label: "Enter amount",
       helper: "Enter the USDC amount to burn on the source chain.",
       disabled: true,
+      active: 0,
+    };
+  }
+  if (!sourceSignerConnected()) {
+    return {
+      label: sourceIsStellar() ? "Connect Stellar source" : "Connect EVM source",
+      helper: "Connect a signing wallet for the source chain.",
+      fn: () => openConnect("source"),
       active: 0,
     };
   }

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Stellar CCTP Bridge</title>
-  <link rel="stylesheet" href="./src/styles.css?v=20260804-recovery">
+  <link rel="stylesheet" href="./src/styles.css?v=20260804-redesign1">
 </head>
 <body>
   <div class="toast-wrap" id="toastWrap"></div>
@@ -14,31 +14,35 @@
       <div class="brand-mark" aria-hidden="true">C</div>
       <div>
         <h1>Stellar CCTP Bridge</h1>
-        <p>USDC burn, attest, mint, and recover flows for Stellar CCTP V2.</p>
+        <p>Move USDC between Stellar and EVM networks.</p>
       </div>
     </div>
     <div class="top-actions">
+      <div class="env-switch" role="group" aria-label="Environment">
+        <button class="seg active" id="testnetBtn" type="button">Testnet</button>
+        <button class="seg" id="mainnetBtn" type="button">Mainnet</button>
+      </div>
       <span class="status-pill" id="networkBadge">Testnet preview</span>
       <button class="small-btn history-trigger" id="historyBtn" type="button">
         History <span id="historyCount">0</span>
       </button>
+      <button class="icon-btn" id="settingsBtn" type="button" title="Settings and diagnostics" aria-label="Settings and diagnostics">
+        <span aria-hidden="true">⚙</span>
+      </button>
       <button class="icon-btn" id="resetBtn" type="button" title="Reset transfer" aria-label="Reset transfer">
-        <span aria-hidden="true">R</span>
+        <span aria-hidden="true">↻</span>
       </button>
     </div>
   </header>
 
-  <main class="shell app-grid">
+  <main class="shell app-shell">
     <section class="workspace">
       <div class="section-title">
         <div>
           <h2>Bridge USDC</h2>
-          <p id="routeSubtitle">Choose a route and quote the transfer before signing.</p>
+          <p id="routeSubtitle">Choose a route and enter an amount.</p>
         </div>
-        <div class="env-switch" role="group" aria-label="Environment">
-          <button class="seg active" id="testnetBtn" type="button">Testnet</button>
-          <button class="seg" id="mainnetBtn" type="button">Mainnet</button>
-        </div>
+        <span class="quote-state" id="quoteStatus">Not quoted</span>
       </div>
 
       <div class="swap-card">
@@ -56,8 +60,14 @@
 
           <div class="chain-balance-row">
             <label class="chain-select">
-              <span>Source chain</span>
-              <select id="sourceChain"></select>
+              <span>Source network</span>
+              <span class="chain-control">
+                <span class="chain-avatar" aria-hidden="true">
+                  <img id="sourceChainIcon" alt="">
+                  <b id="sourceChainFallback">S</b>
+                </span>
+                <select id="sourceChain"></select>
+              </span>
             </label>
             <div class="balance-pill receive-pill">
               <span>Balance</span>
@@ -68,7 +78,7 @@
           <label class="amount-box">
             <span>You send</span>
             <input id="amountInput" inputmode="decimal" autocomplete="off" placeholder="0.00">
-            <b>USDC</b>
+            <b class="token-mark"><i aria-hidden="true">$</i> USDC</b>
           </label>
 
           <div class="amount-presets" aria-label="Quick amount">
@@ -93,97 +103,108 @@
             </button>
           </div>
 
-          <div class="chain-balance-row">
+          <div class="chain-balance-row destination-chain-row">
             <label class="chain-select">
-              <span>Destination chain</span>
-              <select id="destChain"></select>
+              <span>Destination network</span>
+              <span class="chain-control">
+                <span class="chain-avatar" aria-hidden="true">
+                  <img id="destChainIcon" alt="">
+                  <b id="destChainFallback">B</b>
+                </span>
+                <select id="destChain"></select>
+              </span>
             </label>
-            <div class="balance-pill">
-              <span>Receive</span>
-              <strong id="receiveAmountOut">0.00 USDC</strong>
+            <div class="balance-pill destination-pill">
+              <span>Delivery</span>
+              <strong id="deliveryCompactOut">Auto-delivery</strong>
             </div>
           </div>
 
           <div class="route-mode" role="group" aria-label="Transfer mode">
             <button class="speed-card active" id="standardBtn" type="button">
               <strong>Standard</strong>
-              <span>Lower fee</span>
+              <span id="standardMeta">~20 min · Lower fee</span>
             </button>
             <button class="speed-card" id="fastBtn" type="button">
               <strong>Fast</strong>
-              <span id="fastMeta">Quick attestation</span>
+              <span id="fastMeta">~30 sec · Circle fee</span>
             </button>
             <button class="speed-card" id="forwardingToggleWrap" type="button">
               <strong>Auto-deliver</strong>
-              <span>No receive step</span>
+              <span id="forwardingMeta">~30 sec · No receive step</span>
             </button>
             <input id="forwardingToggle" type="checkbox" hidden checked>
           </div>
 
-          <div class="quote-summary">
-            <div>
-              <span>You burn</span>
-              <strong id="burnAmountOut">0.00 USDC</strong>
-            </div>
-            <div>
-              <span>Bridge fee</span>
-              <strong id="feeEstimateOut">0.00 USDC</strong>
-            </div>
-            <div>
-              <span>maxFee</span>
-              <strong id="maxFeeOut">0.00 USDC</strong>
-            </div>
-            <div>
-              <span>Status</span>
-              <strong id="quoteStatus">Not quoted</strong>
-            </div>
+          <button class="recipient-card" id="recipientToggleBtn" type="button">
+            <span>
+              <strong id="recipientToggleLabel">Send to another address</strong>
+              <small id="recipientToggleMeta">Use your connected destination wallet by default.</small>
+            </span>
+            <i class="toggle-indicator" aria-hidden="true"></i>
+          </button>
+          <div class="recipient-fields" id="recipientFields">
+            <label class="field recipient-field">
+              <span>Receiving address</span>
+              <input id="recipientInput" class="mono" autocomplete="off" placeholder="0x... or G...">
+            </label>
+            <button class="small-btn" id="useConnectedRecipientBtn" type="button" disabled>Use connected wallet</button>
           </div>
-
-          <div class="recipient-card">
-            <div>
-              <strong>Send to a different address</strong>
-              <p>Bridge to your wallet or another recipient.</p>
-            </div>
-            <button class="small-btn" id="useConnectedRecipientBtn" type="button" disabled>Use wallet</button>
-          </div>
-          <label class="field recipient-field">
-            <span>Receiving address</span>
-            <input id="recipientInput" class="mono" autocomplete="off" placeholder="0x... or G...">
-          </label>
         </section>
       </div>
 
-      <div class="route-tools">
-        <button class="small-btn primary" id="refreshQuoteBtn" type="button">Refresh quote</button>
-        <button class="small-btn" id="refreshAllowanceBtn" type="button">Check fast allowance</button>
-        <label class="buffer-line">
-          <span>maxFee buffer</span>
-          <input id="feeBufferInput" inputmode="numeric" value="20">
-          <span>%</span>
-        </label>
-      </div>
-
-      <div class="notice" id="routeNotice">
-        <strong id="routeNoticeTitle">Route ready</strong>
-        <span id="routeNoticeText">Quote the transfer to continue.</span>
-      </div>
-
-      <section class="fee-details" aria-label="Fee details">
-        <div class="metric">
-          <span>Forwarding fee</span>
-          <strong id="forwardFeeOut">-</strong>
+      <section class="quote-card" aria-label="Transfer quote">
+        <div class="quote-primary">
+          <span>You receive</span>
+          <strong id="receiveAmountOut">0.00 USDC</strong>
         </div>
-        <div class="metric">
-          <span>Protocol fee</span>
-          <strong id="protocolFeeOut">-</strong>
+        <div class="quote-highlights">
+          <div>
+            <span>Total fee</span>
+            <strong id="feeEstimateOut">0.00 USDC</strong>
+          </div>
+          <div>
+            <span>Estimated time</span>
+            <strong id="etaOut">~30 sec</strong>
+          </div>
         </div>
-        <p id="quoteNote" class="quiet">Fees are fetched from Circle before signing.</p>
+        <button class="fee-details-toggle" id="feeDetailsToggle" type="button" aria-expanded="false">
+          <span>Fee breakdown</span>
+          <b aria-hidden="true">⌄</b>
+        </button>
+        <div class="fee-details-panel" id="feeDetailsPanel">
+          <div class="quote-breakdown">
+            <div><span>You burn</span><strong id="burnAmountOut">0.00 USDC</strong></div>
+            <div><span>maxFee</span><strong id="maxFeeOut">0.00 USDC</strong></div>
+            <div><span>Forwarding fee</span><strong id="forwardFeeOut">-</strong></div>
+            <div><span>Protocol fee</span><strong id="protocolFeeOut">-</strong></div>
+          </div>
+          <div class="route-tools">
+            <button class="small-btn primary" id="refreshQuoteBtn" type="button">Refresh quote</button>
+            <button class="small-btn" id="refreshAllowanceBtn" type="button">Check allowance</button>
+            <label class="buffer-line">
+              <span>maxFee buffer</span>
+              <input id="feeBufferInput" inputmode="numeric" value="20">
+              <span>%</span>
+            </label>
+          </div>
+          <div class="notice" id="routeNotice">
+            <strong id="routeNoticeTitle">Route ready</strong>
+            <span id="routeNoticeText">Quote the transfer to continue.</span>
+          </div>
+          <p id="quoteNote" class="quiet">Fees are fetched from Circle before signing.</p>
+        </div>
       </section>
 
       <button class="main-action" id="mainActionBtn" type="button">Connect source wallet</button>
       <p class="helper" id="mainHelper">Connect your sending wallet to begin.</p>
+      <div class="trust-row" aria-label="Bridge assurances">
+        <span>Circle CCTP</span>
+        <span>Non-custodial</span>
+        <span>Recoverable transfers</span>
+      </div>
 
-      <section class="timeline-panel" aria-labelledby="progressHeading">
+      <section class="timeline-panel" id="timelinePanel" aria-labelledby="progressHeading">
         <h3 id="progressHeading">Progress</h3>
         <div id="timeline"></div>
       </section>
@@ -201,8 +222,18 @@
         <button class="small-btn" id="copySummaryBtn" type="button">Copy summary</button>
       </section>
     </section>
+  </main>
 
-    <aside class="side-stack">
+  <div class="drawer-backdrop" id="drawerBackdrop"></div>
+  <aside class="details-drawer" id="detailsDrawer" aria-hidden="true" aria-labelledby="detailsTitle">
+    <div class="drawer-head">
+      <div>
+        <h2 id="detailsTitle">Settings</h2>
+        <p>Network controls and transfer diagnostics.</p>
+      </div>
+      <button class="icon-btn" id="settingsCloseBtn" type="button" aria-label="Close settings">×</button>
+    </div>
+    <div class="drawer-scroll">
       <section class="panel">
         <h3>Network</h3>
         <div class="kv"><span>Environment</span><strong id="envOut">testnet</strong></div>
@@ -270,8 +301,8 @@
           <div class="log-box mono" id="logBox" aria-live="polite"></div>
         </div>
       </section>
-    </aside>
-  </main>
+    </div>
+  </aside>
 
   <div class="backdrop" id="backdrop"></div>
 
@@ -339,7 +370,7 @@
     </div>
   </section>
 
-  <script src="./src/transfer-store.js?v=20260804-recovery"></script>
-  <script src="./src/app.js?v=20260804-recovery"></script>
+  <script src="./src/transfer-store.js?v=20260804-redesign1"></script>
+  <script src="./src/app.js?v=20260804-redesign1"></script>
 </body>
 </html>

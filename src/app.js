@@ -286,12 +286,17 @@ const ids = [
   "networkBadge",
   "routeSubtitle",
   "resetBtn",
+  "settingsBtn",
   "historyBtn",
   "historyCount",
   "sourceChain",
   "destChain",
   "swapRouteBtn",
   "sourceBalanceOut",
+  "sourceChainIcon",
+  "sourceChainFallback",
+  "destChainIcon",
+  "destChainFallback",
   "amountInput",
   "recipientInput",
   "sourceWalletBtn",
@@ -301,10 +306,16 @@ const ids = [
   "destWalletTitle",
   "destWalletMeta",
   "useConnectedRecipientBtn",
+  "recipientToggleBtn",
+  "recipientToggleLabel",
+  "recipientToggleMeta",
+  "recipientFields",
   "refreshQuoteBtn",
   "refreshAllowanceBtn",
   "fastBtn",
   "fastMeta",
+  "standardMeta",
+  "forwardingMeta",
   "standardBtn",
   "forwardingToggleWrap",
   "forwardingToggle",
@@ -313,6 +324,10 @@ const ids = [
   "routeNoticeTitle",
   "routeNoticeText",
   "quoteStatus",
+  "etaOut",
+  "deliveryCompactOut",
+  "feeDetailsToggle",
+  "feeDetailsPanel",
   "burnAmountOut",
   "receiveAmountOut",
   "feeEstimateOut",
@@ -322,6 +337,7 @@ const ids = [
   "quoteNote",
   "mainActionBtn",
   "mainHelper",
+  "timelinePanel",
   "timeline",
   "successPanel",
   "successText",
@@ -385,6 +401,9 @@ const ids = [
   "historyList",
   "historyEmpty",
   "clearCompletedBtn",
+  "drawerBackdrop",
+  "detailsDrawer",
+  "settingsCloseBtn",
 ];
 
 const el = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
@@ -396,6 +415,7 @@ const state = {
   destId: "base-sepolia",
   speed: "fast",
   useCircleForwarding: true,
+  customRecipient: false,
   feeBufferPct: 20,
   busy: false,
   connectTarget: "source",
@@ -499,6 +519,27 @@ function sourceChain() {
 
 function destChain() {
   return chains().find((chain) => chain.id === state.destId) ?? env().evm[0];
+}
+
+function chainVisual(chain) {
+  const id = chain.id;
+  if (id.startsWith("stellar")) return { slug: "stellar", color: "111827", fallback: "S" };
+  if (id.startsWith("base")) return { slug: "base", color: "0052ff", fallback: "B" };
+  if (id.startsWith("ethereum")) return { slug: "ethereum", color: "627eea", fallback: "E" };
+  if (id.startsWith("arbitrum")) return { slug: "arbitrum", color: "28a0f0", fallback: "A" };
+  if (id.startsWith("op")) return { slug: "optimism", color: "ff0420", fallback: "OP" };
+  if (id.startsWith("avalanche")) return { slug: "avalanche", color: "e84142", fallback: "A" };
+  if (id.startsWith("polygon")) return { slug: "polygon", color: "8247e5", fallback: "P" };
+  return { slug: "circle", color: "2556d6", fallback: chain.shortLabel?.slice(0, 1) || "?" };
+}
+
+function applyChainVisual(img, fallback, chain) {
+  const visual = chainVisual(chain);
+  fallback.textContent = visual.fallback;
+  img.classList.remove("failed");
+  img.onload = () => img.classList.remove("failed");
+  img.onerror = () => img.classList.add("failed");
+  img.src = `https://cdn.simpleicons.org/${visual.slug}/${visual.color}`;
 }
 
 function sourceIsStellar() {
@@ -670,9 +711,9 @@ function currentAction() {
   }
   if (mainnetBlocked()) {
     return {
-      label: "Mainnet locked",
-      helper: "Arm mainnet actions before signing transactions with real USDC.",
-      disabled: true,
+      label: "Review mainnet safety",
+      helper: "Open Settings and arm mainnet actions before signing with real USDC.",
+      fn: () => setDetailsDrawer(true),
       active: 0,
     };
   }
@@ -868,9 +909,9 @@ function currentPostBurnAction() {
   }
   if (mainnetBlocked()) {
     return {
-      label: "Mainnet locked",
-      helper: "Arm mainnet actions before signing the destination recovery transaction.",
-      disabled: true,
+      label: "Review mainnet safety",
+      helper: "Open Settings and arm mainnet actions before signing the destination recovery transaction.",
+      fn: () => setDetailsDrawer(true),
       active: 5,
     };
   }
@@ -965,7 +1006,7 @@ function updateUi() {
   el.networkBadge.textContent = state.env === "mainnet" ? "Mainnet guarded" : "Testnet preview";
   el.routeSubtitle.textContent = location.protocol === "file:"
     ? "Route controls work here, but wallet extensions should be tested from http://localhost:4173/."
-    : "Choose a route and quote the transfer before signing.";
+    : "Choose a route and enter an amount.";
   el.envOut.textContent = state.env;
   el.mainnetArmedOut.textContent = String(state.mainnetArmed);
   el.testnetBtn.classList.toggle("active", state.env === "testnet");
@@ -974,6 +1015,8 @@ function updateUi() {
 
   el.sourceChain.value = state.sourceId;
   el.destChain.value = state.destId;
+  applyChainVisual(el.sourceChainIcon, el.sourceChainFallback, sourceChain());
+  applyChainVisual(el.destChainIcon, el.destChainFallback, destChain());
   el.recipientInput.placeholder = destIsStellar() ? "G... / M... / C..." : "0x...";
   el.sourceBalanceOut.textContent = sourceBalanceLabel();
   document.querySelectorAll("[data-preset]").forEach((button) => {
@@ -994,17 +1037,28 @@ function updateUi() {
   el.sourceWalletBtn.classList.toggle("good", sourceSignerConnected());
   el.destWalletBtn.classList.toggle("good", destAddressAvailable());
   el.useConnectedRecipientBtn.disabled = !destAddressAvailable();
+  const showRecipientFields = state.customRecipient || !destAddressAvailable();
+  el.recipientFields.classList.toggle("open", showRecipientFields);
+  el.recipientToggleBtn.classList.toggle("active", state.customRecipient);
+  el.recipientToggleBtn.disabled = !destAddressAvailable();
+  el.recipientToggleLabel.textContent = state.customRecipient ? "Sending to another address" : "Send to another address";
+  el.recipientToggleMeta.textContent = !destAddressAvailable()
+    ? "Connect a receiver or enter an address below."
+    : state.customRecipient
+      ? "A custom recipient will receive this transfer."
+      : `Using ${short(destIsStellar() ? state.stellar.address : state.evm.address)}.`;
 
   if (state.speed === "fast" && !canUseFast()) state.speed = "standard";
   el.fastBtn.disabled = !canUseFast();
   el.standardBtn.classList.toggle("active", routeMode() === "standard");
   el.fastBtn.classList.toggle("active", routeMode() === "fast");
   el.forwardingToggleWrap.classList.toggle("active", routeMode() === "delivery");
+  el.standardMeta.textContent = "~20 min · Lower fee";
   el.fastMeta.textContent = canUseFast()
-    ? "Quick attestation"
-    : "Fast is unavailable from this source.";
-  el.forwardingToggleWrap.querySelector("span").textContent = autoDeliveryAvailable()
-    ? "No receive step"
+    ? `~30 sec · ${state.quote.status === "ready" ? fmt(feeSourceUnits(state.quote.estimatedFee6), sourceDecimals()) : "Circle fee"}`
+    : "Unavailable from source";
+  el.forwardingMeta.textContent = autoDeliveryAvailable()
+    ? `~30 sec · ${state.quote.status === "ready" ? fmt(feeSourceUnits(state.quote.estimatedFee6), sourceDecimals()) : "No receive step"}`
     : "Unavailable here";
 
   const routeInfo = getRouteNotice();
@@ -1013,9 +1067,12 @@ function updateUi() {
   el.routeNoticeText.textContent = routeInfo.text;
 
   el.quoteStatus.textContent = quoteStatusLabel();
+  el.quoteStatus.dataset.state = state.quote.status;
   el.burnAmountOut.textContent = fmt(burnSourceUnits(), sourceDecimals());
   el.receiveAmountOut.textContent = fmt(receiveDestUnits(), destDecimals());
   el.feeEstimateOut.textContent = fmt(feeSourceUnits(state.quote.estimatedFee6), sourceDecimals());
+  el.etaOut.textContent = routeMode() === "standard" ? "~20 min" : "~30 sec";
+  el.deliveryCompactOut.textContent = deliveryLabel();
   el.maxFeeOut.textContent = fmt(feeSourceUnits(state.quote.maxFee6), sourceDecimals());
   el.forwardFeeOut.textContent = state.quote.forwardFee6 ? fmt(feeSourceUnits(state.quote.forwardFee6), sourceDecimals()) : "-";
   el.protocolFeeOut.textContent = state.quote.protocolFee6 ? fmt(feeSourceUnits(state.quote.protocolFee6), sourceDecimals()) : "-";
@@ -1042,6 +1099,10 @@ function updateUi() {
   el.mainActionBtn.textContent = state.busy ? "Working..." : action.label;
   el.mainActionBtn.disabled = state.busy || !!action.disabled;
   el.mainHelper.textContent = action.helper;
+  el.timelinePanel.classList.toggle(
+    "open",
+    state.flow.stellarApproved || state.flow.evmApproved || !!state.flow.approveTxHash || transferHasStarted(),
+  );
   updateTimeline(action.active);
   updateSuccess();
   if (state.persistenceReady) persistCurrentTransfer();
@@ -2179,6 +2240,7 @@ function autoFillRecipient() {
   if (state.connectTarget !== "dest") return;
   if (destIsStellar() && state.stellar.address) el.recipientInput.value = state.stellar.address;
   if (destIsEvm() && state.evm.address) el.recipientInput.value = state.evm.address;
+  state.customRecipient = false;
 }
 
 async function detectVaultOrMultisig(address) {
@@ -2529,6 +2591,19 @@ function showModal(id) {
   el[id].classList.add("open");
 }
 
+function setDetailsDrawer(open) {
+  el.detailsDrawer.classList.toggle("open", open);
+  el.drawerBackdrop.classList.toggle("open", open);
+  el.detailsDrawer.setAttribute("aria-hidden", String(!open));
+  document.documentElement.classList.toggle("drawer-open", open);
+}
+
+function setFeeDetails(open) {
+  el.feeDetailsPanel.classList.toggle("open", open);
+  el.feeDetailsToggle.classList.toggle("open", open);
+  el.feeDetailsToggle.setAttribute("aria-expanded", String(open));
+}
+
 function closeModals() {
   el.backdrop.classList.remove("open");
   document.querySelectorAll(".modal.open").forEach((modal) => modal.classList.remove("open"));
@@ -2688,6 +2763,7 @@ function restoreTransfer(snapshot, { notify = true } = {}) {
   populateChains();
   el.amountInput.value = String(snapshot.amount || "");
   el.recipientInput.value = String(snapshot.recipient || "");
+  state.customRecipient = !!snapshot.recipient;
   el.feeBufferInput.value = String(state.feeBufferPct);
   el.burnHashInput.value = state.flow.burnTxHash || "";
   el.nonceInput.value = state.flow.nonce || "";
@@ -2850,6 +2926,7 @@ function resetFlow(clearInputs = true) {
   state.flow = blankFlow();
   state.lastPersistedSnapshot = "";
   if (clearInputs) {
+    state.customRecipient = false;
     el.amountInput.value = "";
     el.recipientInput.value = "";
     el.burnHashInput.value = "";
@@ -3146,7 +3223,10 @@ function bindEvents() {
     refreshSourceBalance();
   };
   el.amountInput.oninput = handleTransferInputChange;
-  el.recipientInput.oninput = handleTransferInputChange;
+  el.recipientInput.oninput = () => {
+    state.customRecipient = true;
+    handleTransferInputChange();
+  };
   el.feeBufferInput.oninput = () => {
     state.feeBufferPct = Math.max(0, Number(el.feeBufferInput.value) || 0);
     if (state.quote.status === "ready") state.quote.maxFee6 = applyBuffer(state.quote.estimatedFee6, state.feeBufferPct);
@@ -3159,10 +3239,21 @@ function bindEvents() {
   el.standardBtn.onclick = () => setRouteMode("standard");
   el.sourceWalletBtn.onclick = () => openConnect("source");
   el.destWalletBtn.onclick = () => openConnect("dest");
+  el.recipientToggleBtn.onclick = () => {
+    if (!destAddressAvailable()) return;
+    state.customRecipient = !state.customRecipient;
+    if (!state.customRecipient) {
+      state.connectTarget = "dest";
+      autoFillRecipient();
+      handleTransferInputChange();
+      return;
+    }
+    updateUi();
+  };
   el.useConnectedRecipientBtn.onclick = () => {
     state.connectTarget = "dest";
     autoFillRecipient();
-    updateUi();
+    handleTransferInputChange();
   };
   el.mainActionBtn.onclick = runMain;
   el.historyBtn.onclick = () => {
@@ -3179,6 +3270,10 @@ function bindEvents() {
   };
   el.testnetBtn.onclick = () => setEnv("testnet");
   el.mainnetBtn.onclick = () => setEnv("mainnet");
+  el.settingsBtn.onclick = () => setDetailsDrawer(true);
+  el.settingsCloseBtn.onclick = () => setDetailsDrawer(false);
+  el.drawerBackdrop.onclick = () => setDetailsDrawer(false);
+  el.feeDetailsToggle.onclick = () => setFeeDetails(!el.feeDetailsPanel.classList.contains("open"));
   el.armMainnetBtn.onclick = () => {
     state.mainnetArmed = !state.mainnetArmed;
     toast("info", state.mainnetArmed ? "Mainnet armed" : "Mainnet locked", state.mainnetArmed ? "Mainnet actions are enabled." : "Mainnet actions are locked.");
@@ -3203,6 +3298,9 @@ function bindEvents() {
   el.backdrop.onclick = handleUserModalClose;
   document.querySelectorAll("[data-close]").forEach((button) => {
     button.onclick = handleUserModalClose;
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setDetailsDrawer(false);
   });
   window.addEventListener("pagehide", persistCurrentTransfer);
   document.addEventListener("visibilitychange", () => {

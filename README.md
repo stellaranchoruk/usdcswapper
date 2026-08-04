@@ -1,6 +1,6 @@
 # USDCSwap CCTP Bridge
 
-A browser-based prototype for bridging native USDC with Circle CCTP V2 across Stellar and EVM testnets, with notes for adding Solana support next.
+A browser-based application for bridging native USDC with Circle CCTP V2 across Stellar and EVM networks, with a guarded mainnet beta and notes for adding Solana support next.
 
 ## Current Scope
 
@@ -14,6 +14,8 @@ A browser-based prototype for bridging native USDC with Circle CCTP V2 across St
 - Confirmed EVM transaction receipts before the UI advances approval, burn, or receive steps.
 - Live source USDC balances with 25%, 50%, 75%, and MAX amount shortcuts.
 - Browser extension and multi-chain WalletConnect wallet flows.
+- Browser-local transfer persistence, automatic polling resume, and submitted-transfer history.
+- Guarded Stellar mainnet beta with explicit arming and a 10 USDC per-transfer UI cap.
 
 ## Local Testing
 
@@ -41,7 +43,7 @@ For GitHub Pages, publish from the root of the default branch. No build command 
 
 - Stellar USDC uses 7 decimal places; CCTP/EVM/Solana amounts use 6 decimal subunits.
 - Stellar source approval and burn transactions are Soroban contract invocations. The signing wallet must support Soroban transaction XDR.
-- EVM -> EVM and Stellar testnet -> EVM can use Circle Forwarding Service or manual destination `receiveMessage`.
+- EVM -> EVM and Stellar -> eligible EVM destinations can request Circle Forwarding Service delivery; approval remains blocked unless Circle returns a valid route quote.
 - Forwarded EVM transfers are only marked complete after the destination transaction receipt succeeds.
 - EVM/Solana -> Stellar must target Stellar `CctpForwarder` for inbound Stellar recipients.
 - Solana support is planned but requires Solana wallet connection, Associated Token Account derivation, and Solana CCTP program account construction.

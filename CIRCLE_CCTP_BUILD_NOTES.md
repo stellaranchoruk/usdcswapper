@@ -33,6 +33,7 @@ Best path:
 - Attestations come from `/v2/messages/{sourceDomainId}?transactionHash=...`. Forwarding routes should not be marked complete just because an attestation exists; the UI should wait for a destination/forward transaction hash or offer manual receive recovery.
 - For Forwarding Service routes, wait two minutes after the attestation becomes ready before promoting manual recovery. Unlock recovery immediately only when the destination transaction is confirmed failed.
 - EVM approvals, burns, manual receives, and forwarded destination transactions must have successful receipts before their steps are marked complete.
+- Persist public transfer state in the browser so submitted burns resume Iris polling after reload; never persist wallet sessions, private keys, or mainnet arming.
 
 ## EVM Routes
 
@@ -70,12 +71,12 @@ Then encode the extended forwarding hook data with ATA setup fields.
 - For inbound transfers to a Stellar user or muxed account, always set both `mintRecipient` and `destinationCaller` to the Stellar `CctpForwarder` contract address and put the final Stellar recipient strkey in hook data.
 - If `mintRecipient` is a Stellar user account instead of `CctpForwarder`, or `destinationCaller` is wrong, funds can become permanently stuck.
 - Stellar `decodedMessage` fields may be `null` in Circle API responses because the API cannot infer address type from raw 32-byte payloads; parse the raw `message` if needed.
-- Stellar exposes `deposit_for_burn_with_hook`, and Circle's Forwarding Service is requested through source burn hook data. The app enables this for Stellar-to-EVM test routes but keeps it disabled for Stellar mainnet until a signed testnet transfer succeeds.
+- Stellar exposes `deposit_for_burn_with_hook`, and Circle's Forwarding Service is requested through source burn hook data. Mainnet beta exposes this mode only behind a successful Circle forwarding quote, explicit arming, and the temporary 10 USDC cap.
 - Stellar source approval and burn transactions are Soroban contract invocations. The connected wallet must be able to parse and sign Soroban transaction XDRs; older/classic-only WalletConnect paths can fail with low-level XDR errors such as `Bad union switch`.
 
 ## Implementation Checklist
 
-- Complete signed testnet transfers for Stellar -> EVM auto-delivery, EVM -> EVM auto-delivery, and EVM -> Stellar manual forwarder receive.
+- Complete capped mainnet beta transfers for Stellar -> EVM and EVM -> Stellar after repeating the signed testnet matrix.
 - Add Solana chain config for devnet/mainnet, including USDC mint, RPC, explorers, and CCTP program IDs.
 - Add Solana wallet connection layer: Phantom, Solflare, and manual receive address.
 - Add Solana address validation and ATA derivation.

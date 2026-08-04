@@ -632,6 +632,25 @@ h3 {
   width: 100%;
 }
 
+.history-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+}
+
+.history-trigger span {
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  padding: 0 5px;
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-size: 11px;
+}
+
 .transfer-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1182,6 +1201,107 @@ textarea {
   font-size: 12px;
 }
 
+.history-modal-inner {
+  width: min(640px, 100%);
+}
+
+.history-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.history-item {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-soft);
+  padding: 13px;
+}
+
+.history-item-head,
+.history-actions,
+.history-route {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.history-item-head {
+  justify-content: space-between;
+}
+
+.history-item-head time,
+.history-meta,
+.history-recipient {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.history-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.history-status.complete {
+  border-color: #9dddbc;
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.history-status.recovery {
+  border-color: #f5c16c;
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.history-route {
+  margin-top: 12px;
+  justify-content: space-between;
+}
+
+.history-route strong {
+  font-size: 14px;
+}
+
+.history-route b {
+  font-size: 13px;
+}
+
+.history-meta,
+.history-recipient {
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+
+.history-actions {
+  margin-top: 11px;
+  flex-wrap: wrap;
+}
+
+.history-empty {
+  display: none;
+  margin-top: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.history-empty.open {
+  display: block;
+}
+
+.history-toolbar {
+  justify-content: flex-end;
+}
+
 .hidden {
   display: none !important;
 }
@@ -1201,6 +1321,10 @@ textarea {
   .section-title {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .top-actions {
+    justify-content: space-between;
   }
 
   .route-board,
@@ -1290,5 +1414,10 @@ textarea {
     width: 100%;
     border-radius: 18px 18px 0 0;
     max-height: 88dvh;
+  }
+
+  .history-route {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

@@ -8,8 +8,10 @@ const TIMEOUT_SECONDS = 180;
 const EVM_RECEIPT_TIMEOUT_MS = 240000;
 const AUTO_DELIVERY_GRACE_MS = 120000;
 const MAX_BURN_UNITS6 = 10000000n * 10n ** DECIMALS_EVM;
+const MAINNET_BETA_MAX_UNITS6 = 10n * 10n ** DECIMALS_EVM;
 const WALLETCONNECT_PROJECT_ID = "f658ce3a7c8a185214974f71539fea39";
 const VAULT_SIGNER_KEY = "GA2T6GR7VXXXBETTERSAFETHANSORRYXXXPROTECTEDBYLOBSTRVAULT";
+const TransferStore = globalThis.CctpTransferStore;
 
 let StellarSdk = null;
 let SignClient = null;
@@ -284,6 +286,8 @@ const ids = [
   "networkBadge",
   "routeSubtitle",
   "resetBtn",
+  "historyBtn",
+  "historyCount",
   "sourceChain",
   "destChain",
   "swapRouteBtn",
@@ -377,6 +381,10 @@ const ids = [
   "signingSubtext",
   "openSigningWalletBtn",
   "copySigningLinkBtn",
+  "historyModal",
+  "historyList",
+  "historyEmpty",
+  "clearCompletedBtn",
 ];
 
 const el = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
@@ -422,6 +430,8 @@ const state = {
   pollCount: 0,
   quoteTimer: null,
   quoteRequestId: 0,
+  persistenceReady: false,
+  lastPersistedSnapshot: "",
 };
 
 const announcedEvmProviders = [];
@@ -451,6 +461,7 @@ function blankSourceBalance() {
 function blankFlow() {
   return {
     transferId: makeTransferId(),
+    startedAt: Date.now(),
     evmApproved: false,
     stellarApproved: false,
     burnSubmitted: false,
@@ -573,7 +584,7 @@ function usesStellarForwarder() {
 }
 
 function circleForwardingAvailable() {
-  const sourceSupported = sourceIsEvm() || (sourceIsStellar() && state.env === "testnet");
+  const sourceSupported = sourceIsEvm() || sourceIsStellar();
   return sourceSupported && destIsEvm() && !!destChain().forwardingDestination && !sameDomainRoute();
 }
 
@@ -648,6 +659,7 @@ function setRouteMode(mode) {
 }
 
 function currentAction() {
+  if (transferHasStarted()) return currentPostBurnAction();
   if (sameDomainRoute()) {
     return {
       label: "Choose different domains",
@@ -684,6 +696,14 @@ function currentAction() {
     return {
       label: "Amount exceeds CCTP limit",
       helper: "A single CCTP burn cannot exceed 10,000,000 USDC.",
+      disabled: true,
+      active: 0,
+    };
+  }
+  if (state.env === "mainnet" && amount6() > MAINNET_BETA_MAX_UNITS6) {
+    return {
+      label: "Mainnet beta limit",
+      helper: "Mainnet beta transfers are currently capped at 10 USDC.",
       disabled: true,
       active: 0,
     };
@@ -797,9 +817,31 @@ function currentAction() {
       };
     }
   }
-  if (usesCircleForwarding() && state.flow.autoDelivered) {
-    return doneAction();
+  return currentPostBurnAction();
+}
+
+function transferHasStarted() {
+  return state.flow.burnSubmitted || !!state.flow.burnTxHash;
+}
+
+function currentPostBurnAction() {
+  if (state.flow.burnTxHash && !state.flow.burnSubmitted) {
+    if (sourceIsEvm()) {
+      return {
+        label: "Check burn confirmation",
+        helper: `Resume confirmation for ${short(state.flow.burnTxHash)} without submitting another burn.`,
+        fn: confirmPendingEvmBurn,
+        active: 3,
+      };
+    }
+    return {
+      label: "Waiting for burn confirmation",
+      helper: "The source transaction was saved. Confirm it before resuming Circle polling.",
+      disabled: true,
+      active: 3,
+    };
   }
+  if (usesCircleForwarding() && state.flow.autoDelivered) return doneAction();
   if (usesCircleForwarding() && !state.flow.messageHex) {
     return {
       label: "Waiting for Circle",
@@ -820,6 +862,14 @@ function currentAction() {
     return {
       label: "Auto-delivery in progress",
       helper: `Circle has attested the burn and is completing delivery. Manual recovery unlocks in ${autoDeliveryGraceLabel()}.`,
+      disabled: true,
+      active: 5,
+    };
+  }
+  if (mainnetBlocked()) {
+    return {
+      label: "Mainnet locked",
+      helper: "Arm mainnet actions before signing the destination recovery transaction.",
       disabled: true,
       active: 5,
     };
@@ -994,6 +1044,8 @@ function updateUi() {
   el.mainHelper.textContent = action.helper;
   updateTimeline(action.active);
   updateSuccess();
+  if (state.persistenceReady) persistCurrentTransfer();
+  updateHistoryCount();
 }
 
 function walletMeta(wallet, fallback = "Required") {
@@ -1179,28 +1231,31 @@ function routeModelNote() {
 }
 
 function updateTimeline(activeIndex) {
+  const started = transferHasStarted();
   const items = [
     {
       title: "Setup",
-      text: sourceSignerConnected() && recipientValid() ? "Source signer and recipient ready" : "Connect source and add recipient",
-      done: sourceSignerConnected() && burnSourceUnits() > 0n && recipientValid(),
+      text: started ? "Route and recipient saved" : sourceSignerConnected() && recipientValid() ? "Source signer and recipient ready" : "Connect source and add recipient",
+      done: started || sourceSignerConnected() && burnSourceUnits() > 0n && recipientValid(),
     },
     {
       title: "Quote and allowance",
-      text: feeQuoteReady() && fastAllowanceOk() ? "Route checks ready" : "Fetch fees and allowance",
-      done: feeQuoteReady() && fastAllowanceOk(),
-      warn: state.quote.status === "error" || state.allowance.status === "error",
+      text: started ? "Burn parameters saved" : feeQuoteReady() && fastAllowanceOk() ? "Route checks ready" : "Fetch fees and allowance",
+      done: started || feeQuoteReady() && fastAllowanceOk(),
+      warn: !started && (state.quote.status === "error" || state.allowance.status === "error"),
     },
     {
       title: "Approve",
-      text: sourceIsStellar()
+      text: started
+        ? "Source approval completed"
+        : sourceIsStellar()
         ? state.flow.stellarApproved ? "Stellar USDC approved" : "Approve TokenMessengerMinter"
         : state.flow.evmApproved ? "EVM USDC approved" : "Approve TokenMessengerV2",
-      done: sourceIsStellar() ? state.flow.stellarApproved : state.flow.evmApproved,
+      done: started || (sourceIsStellar() ? state.flow.stellarApproved : state.flow.evmApproved),
     },
     {
       title: "Burn",
-      text: state.flow.burnSubmitted ? "Burn submitted" : "Burn source USDC",
+      text: state.flow.burnSubmitted ? "Burn submitted" : state.flow.burnTxHash ? "Checking source confirmation" : "Burn source USDC",
       done: state.flow.burnSubmitted,
     },
     {
@@ -1670,6 +1725,13 @@ async function fetchMessage({ silent = false } = {}) {
 }
 
 function startPolling() {
+  const burnHash = clean(el.burnHashInput.value || state.flow.burnTxHash);
+  if (burnHash) {
+    state.flow.burnTxHash = burnHash;
+    state.flow.burnSubmitted = true;
+    el.burnHashInput.value = burnHash;
+    updateUi();
+  }
   stopPolling();
   state.pollCount = 0;
   pollMessage();
@@ -2486,6 +2548,262 @@ function handleUserModalClose() {
   closeModals();
 }
 
+function currentTransferStatus() {
+  if (state.flow.autoDelivered || state.flow.manualReceived) return "complete";
+  if (state.flow.forwardFailed) return "recovery";
+  if (state.flow.messageHex && state.flow.attestationHex) {
+    if (usesCircleForwarding() && !autoDeliveryFallbackReady()) return "forwarding";
+    return "recovery";
+  }
+  if (state.flow.burnSubmitted) return "attesting";
+  if (state.flow.burnTxHash) return "confirming";
+  if (state.flow.evmApproved || state.flow.stellarApproved || state.flow.approveTxHash) return "preparing";
+  return "draft";
+}
+
+function transferStatusLabel(status = currentTransferStatus()) {
+  return {
+    complete: "Delivered",
+    recovery: "Recovery available",
+    forwarding: "Auto-delivering",
+    attesting: "Waiting for Circle",
+    confirming: "Confirming burn",
+    preparing: "Ready to burn",
+    draft: "Draft",
+  }[status] ?? "Processing";
+}
+
+function quoteSnapshot() {
+  return {
+    status: state.quote.status,
+    forwardFee6: state.quote.forwardFee6.toString(),
+    protocolFee6: state.quote.protocolFee6.toString(),
+    estimatedFee6: state.quote.estimatedFee6.toString(),
+    maxFee6: state.quote.maxFee6.toString(),
+    error: state.quote.error,
+    fetchedAt: state.quote.fetchedAt,
+  };
+}
+
+function currentTransferSnapshot() {
+  const status = currentTransferStatus();
+  const burnHash = clean(state.flow.burnTxHash || el.burnHashInput.value);
+  return {
+    id: state.flow.transferId,
+    env: state.env,
+    sourceId: state.sourceId,
+    destId: state.destId,
+    sourceLabel: sourceChain().label,
+    destLabel: destChain().label,
+    speed: state.speed,
+    useCircleForwarding: state.useCircleForwarding,
+    delivery: deliveryLabel(),
+    feeBufferPct: state.feeBufferPct,
+    amount: el.amountInput.value.trim(),
+    recipient: clean(el.recipientInput.value),
+    quote: quoteSnapshot(),
+    allowance: {
+      status: state.allowance.status,
+      allowance6: state.allowance.allowance6 === null ? null : state.allowance.allowance6.toString(),
+      lastUpdated: state.allowance.lastUpdated,
+    },
+    flow: { ...state.flow, burnTxHash: burnHash },
+    status,
+    statusLabel: transferStatusLabel(status),
+    hasBurn: !!burnHash,
+    createdAt: state.flow.startedAt,
+  };
+}
+
+function hasTransferDraft() {
+  return !!(
+    el.amountInput.value.trim() ||
+    el.recipientInput.value.trim() ||
+    state.flow.approveTxHash ||
+    state.flow.burnTxHash ||
+    el.burnHashInput.value.trim()
+  );
+}
+
+function persistCurrentTransfer() {
+  if (!TransferStore || !hasTransferDraft()) return;
+  try {
+    const snapshot = currentTransferSnapshot();
+    const serialized = JSON.stringify(snapshot);
+    if (serialized === state.lastPersistedSnapshot) return;
+    TransferStore.save(snapshot, localStorage);
+    state.lastPersistedSnapshot = serialized;
+  } catch (error) {
+    log("Transfer persistence failed", errorMessage(error));
+  }
+}
+
+function parseStoredUnits(value) {
+  try {
+    return BigInt(value ?? 0);
+  } catch {
+    return 0n;
+  }
+}
+
+function restoreTransfer(snapshot, { notify = true } = {}) {
+  if (!snapshot || !NETWORKS[snapshot.env]) return false;
+  const available = [NETWORKS[snapshot.env].stellar, ...NETWORKS[snapshot.env].evm];
+  if (!available.some((chain) => chain.id === snapshot.sourceId) || !available.some((chain) => chain.id === snapshot.destId)) return false;
+
+  stopPolling();
+  state.persistenceReady = false;
+  state.env = snapshot.env;
+  state.mainnetArmed = false;
+  state.sourceId = snapshot.sourceId;
+  state.destId = snapshot.destId;
+  state.speed = snapshot.speed === "standard" ? "standard" : "fast";
+  state.useCircleForwarding = !!snapshot.useCircleForwarding;
+  state.feeBufferPct = Math.max(0, Number(snapshot.feeBufferPct) || 0);
+  state.quote = {
+    ...blankQuote(),
+    status: snapshot.quote?.status === "ready" ? "ready" : "idle",
+    forwardFee6: parseStoredUnits(snapshot.quote?.forwardFee6),
+    protocolFee6: parseStoredUnits(snapshot.quote?.protocolFee6),
+    estimatedFee6: parseStoredUnits(snapshot.quote?.estimatedFee6),
+    maxFee6: parseStoredUnits(snapshot.quote?.maxFee6),
+    error: String(snapshot.quote?.error || ""),
+    fetchedAt: String(snapshot.quote?.fetchedAt || ""),
+  };
+  state.allowance = {
+    status: snapshot.allowance?.status === "ready" ? "ready" : "idle",
+    allowance6: snapshot.allowance?.allowance6 === null || snapshot.allowance?.allowance6 === undefined
+      ? null
+      : parseStoredUnits(snapshot.allowance.allowance6),
+    lastUpdated: String(snapshot.allowance?.lastUpdated || ""),
+  };
+  state.flow = {
+    ...blankFlow(),
+    ...(snapshot.flow || {}),
+    transferId: snapshot.id,
+    startedAt: Number(snapshot.createdAt || snapshot.flow?.startedAt || Date.now()),
+    attestationReadyAt: Number(snapshot.flow?.attestationReadyAt || 0),
+  };
+  resetSourceBalance();
+  populateChains();
+  el.amountInput.value = String(snapshot.amount || "");
+  el.recipientInput.value = String(snapshot.recipient || "");
+  el.feeBufferInput.value = String(state.feeBufferPct);
+  el.burnHashInput.value = state.flow.burnTxHash || "";
+  el.nonceInput.value = state.flow.nonce || "";
+  el.messageText.value = state.flow.messageHex || "";
+  el.attestationText.value = state.flow.attestationHex || "";
+  state.lastPersistedSnapshot = "";
+  state.persistenceReady = true;
+  updateUi();
+
+  if (state.flow.burnSubmitted && !state.flow.autoDelivered && !state.flow.manualReceived) {
+    startPolling();
+  } else if (!transferHasStarted() && el.amountInput.value) {
+    scheduleRouteRefresh();
+  }
+  if (notify) toast("ok", "Transfer restored", `${sourceChain().shortLabel} to ${destChain().shortLabel}`);
+  return true;
+}
+
+function restoreActiveTransfer() {
+  if (!TransferStore) return false;
+  try {
+    return restoreTransfer(TransferStore.getActive(localStorage), { notify: false });
+  } catch (error) {
+    log("Could not restore transfer", errorMessage(error));
+    return false;
+  }
+}
+
+function historyTransfers() {
+  if (!TransferStore) return [];
+  try {
+    return TransferStore.list(localStorage);
+  } catch {
+    return [];
+  }
+}
+
+function updateHistoryCount() {
+  if (!el.historyCount) return;
+  el.historyCount.textContent = String(historyTransfers().length);
+}
+
+function storedChain(snapshot, chainId) {
+  const network = NETWORKS[snapshot.env];
+  return [network.stellar, ...network.evm].find((chain) => chain.id === chainId);
+}
+
+function storedTxLink(hash, snapshot, chainId) {
+  if (!hash) return "";
+  const chain = storedChain(snapshot, chainId);
+  if (!chain) return esc(short(hash));
+  const href = chain.kind === "stellar" ? `${NETWORKS[snapshot.env].stellar.explorerTx}${hash}` : `${chain.explorerTx}${hash}`;
+  return `<a href="${esc(href)}" target="_blank" rel="noreferrer">${esc(short(hash))}</a>`;
+}
+
+function renderHistory() {
+  const transfers = historyTransfers();
+  el.historyEmpty.classList.toggle("open", transfers.length === 0);
+  el.clearCompletedBtn.disabled = !transfers.some((item) => item.status === "complete");
+  el.historyList.innerHTML = transfers.map((item) => {
+    const status = item.status || "attesting";
+    const timestamp = Number(item.updatedAt || item.createdAt || Date.now());
+    const date = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(timestamp);
+    const burnLink = storedTxLink(item.flow?.burnTxHash, item, item.sourceId);
+    const receiveHash = item.flow?.forwardTxHash || item.flow?.receiveTxHash;
+    const receiveLink = storedTxLink(receiveHash, item, item.destId);
+    return `<article class="history-item">
+      <div class="history-item-head"><span class="history-status ${esc(status)}">${esc(item.statusLabel || transferStatusLabel(status))}</span><time>${esc(date)}</time></div>
+      <div class="history-route"><strong>${esc(item.sourceLabel || item.sourceId)} to ${esc(item.destLabel || item.destId)}</strong><b>${esc(item.amount || "0")} USDC</b></div>
+      <div class="history-meta">${esc(item.env)} · ${esc(item.delivery || item.speed || "CCTP")}${burnLink ? ` · Burn ${burnLink}` : ""}${receiveLink ? ` · Receive ${receiveLink}` : ""}</div>
+      <div class="history-recipient">To ${esc(short(item.recipient || "-"))}</div>
+      <div class="history-actions">
+        <button class="small-btn primary" type="button" data-history-action="resume" data-transfer-id="${esc(item.id)}">${status === "complete" ? "View" : "Resume"}</button>
+        <button class="small-btn" type="button" data-history-action="copy" data-transfer-id="${esc(item.id)}">Copy</button>
+        <button class="small-btn" type="button" data-history-action="remove" data-transfer-id="${esc(item.id)}">Forget</button>
+      </div>
+    </article>`;
+  }).join("");
+  updateHistoryCount();
+}
+
+function storedSummary(item) {
+  return [
+    `Transfer: ${item.id}`,
+    `Network: ${item.env}`,
+    `Route: ${item.sourceLabel || item.sourceId} -> ${item.destLabel || item.destId}`,
+    `Amount: ${item.amount || "0"} USDC`,
+    `Delivery: ${item.delivery || item.speed || "-"}`,
+    `Status: ${item.statusLabel || item.status || "-"}`,
+    `Recipient: ${item.recipient || "-"}`,
+    `Burn tx: ${item.flow?.burnTxHash || "-"}`,
+    `Forward tx: ${item.flow?.forwardTxHash || "-"}`,
+    `Receive tx: ${item.flow?.receiveTxHash || "-"}`,
+  ].join("\n");
+}
+
+async function handleHistoryAction(event) {
+  const button = event.target.closest("[data-history-action]");
+  if (!button || !TransferStore) return;
+  const id = button.dataset.transferId;
+  const item = TransferStore.get(id, localStorage);
+  if (!item) return renderHistory();
+  if (button.dataset.historyAction === "resume") {
+    closeModals();
+    restoreTransfer(item);
+  } else if (button.dataset.historyAction === "copy") {
+    await navigator.clipboard.writeText(storedSummary(item));
+    toast("ok", "Copied", "Transfer details copied.");
+  } else if (button.dataset.historyAction === "remove") {
+    const removingCurrent = state.flow.transferId === id;
+    TransferStore.remove(id, localStorage);
+    if (removingCurrent) resetFlow(true);
+    renderHistory();
+  }
+}
+
 function setEnv(nextEnv) {
   if (nextEnv === state.env) return;
   const sourceWasStellar = sourceIsStellar();
@@ -2530,6 +2848,7 @@ function resetFlow(clearInputs = true) {
   stopPolling();
   resetRouteChecks();
   state.flow = blankFlow();
+  state.lastPersistedSnapshot = "";
   if (clearInputs) {
     el.amountInput.value = "";
     el.recipientInput.value = "";
@@ -2537,6 +2856,7 @@ function resetFlow(clearInputs = true) {
     el.nonceInput.value = "";
     el.messageText.value = "";
     el.attestationText.value = "";
+    if (TransferStore && state.persistenceReady) TransferStore.clearActive(localStorage);
   }
   updateUi();
 }
@@ -2845,6 +3165,18 @@ function bindEvents() {
     updateUi();
   };
   el.mainActionBtn.onclick = runMain;
+  el.historyBtn.onclick = () => {
+    renderHistory();
+    showModal("historyModal");
+  };
+  el.historyList.onclick = handleHistoryAction;
+  el.clearCompletedBtn.onclick = () => {
+    if (!TransferStore) return;
+    const viewingCompleted = currentTransferStatus() === "complete";
+    TransferStore.clearCompleted(localStorage);
+    if (viewingCompleted) resetFlow(true);
+    renderHistory();
+  };
   el.testnetBtn.onclick = () => setEnv("testnet");
   el.mainnetBtn.onclick = () => setEnv("mainnet");
   el.armMainnetBtn.onclick = () => {
@@ -2872,12 +3204,24 @@ function bindEvents() {
   document.querySelectorAll("[data-close]").forEach((button) => {
     button.onclick = handleUserModalClose;
   });
+  window.addEventListener("pagehide", persistCurrentTransfer);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && !state.busy && state.flow.burnSubmitted && !state.flow.autoDelivered && !state.flow.manualReceived) {
+      startPolling();
+    }
+  });
 }
 
 function init() {
   populateChains();
   bindEvents();
-  updateUi();
+  const restored = restoreActiveTransfer();
+  if (!restored) {
+    state.persistenceReady = true;
+    updateUi();
+  } else if (transferHasStarted()) {
+    toast("info", "Transfer resumed", "Progress was restored from this browser.", 5000);
+  }
   log("Loaded Stellar CCTP Bridge", { env: state.env, transferId: state.flow.transferId });
 }
 

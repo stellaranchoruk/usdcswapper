@@ -684,14 +684,6 @@ function currentAction() {
       active: 0,
     };
   }
-  if (!sourceSignerConnected()) {
-    return {
-      label: sourceIsStellar() ? "Connect Stellar source" : "Connect EVM source",
-      helper: "Connect a signing wallet for the source chain.",
-      fn: () => openConnect("source"),
-      active: 0,
-    };
-  }
   if (amount6() > MAX_BURN_UNITS6) {
     return {
       label: "Amount exceeds CCTP limit",
@@ -705,6 +697,14 @@ function currentAction() {
       label: "Mainnet beta limit",
       helper: "Mainnet beta transfers are currently capped at 10 USDC.",
       disabled: true,
+      active: 0,
+    };
+  }
+  if (!sourceSignerConnected()) {
+    return {
+      label: sourceIsStellar() ? "Connect Stellar source" : "Connect EVM source",
+      helper: "Connect a signing wallet for the source chain.",
+      fn: () => openConnect("source"),
       active: 0,
     };
   }
